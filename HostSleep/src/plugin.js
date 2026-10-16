@@ -45,11 +45,14 @@ const STREAM_START_TIMEOUT_MS = 45000;
 // Cancel button or B, and ctl.close() dismisses it.
 function ReconnectModal({ ctl }) {
     const [st, setSt] = SP_REACT.useState(ctl.state);
+    // Try each cover candidate in turn; drop the picture if none loads
+    const [imgIdx, setImgIdx] = SP_REACT.useState(0);
+    const image = st.images[imgIdx];
     SP_REACT.useEffect(() => { ctl.listener = setSt; return () => { ctl.listener = null; }; }, []);
     const failed = st.phase === "failed";
     return SP_JSX.jsx(DFL.ModalRoot, { bAllowFullSize: true, onCancel: () => ctl.cancel(),
         children: SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: "18px", padding: "12px 0", textAlign: "center" }, children: [
-                st.image && SP_JSX.jsx("img", { src: st.image, style: { height: "220px", borderRadius: "6px", boxShadow: "0 6px 24px rgba(0,0,0,.6)" } }),
+                image && SP_JSX.jsx("img", { src: image, onError: () => setImgIdx((i) => i + 1), style: { height: "220px", borderRadius: "6px", boxShadow: "0 6px 24px rgba(0,0,0,.6)" } }),
                 SP_JSX.jsx("div", { style: { fontSize: "24px", fontWeight: "bold" }, children: failed ? `Couldn't reconnect to ${st.name}` : `Reconnecting to ${st.name}` }),
                 !failed && SP_JSX.jsx(DFL.SteamSpinner, { style: { height: "64px" } }),
                 SP_JSX.jsx("div", { style: { fontSize: "16px", opacity: 0.8 }, children: st.status }),
@@ -58,13 +61,20 @@ function ReconnectModal({ ctl }) {
 }
 function openReconnectModal(appid) {
     const overview = window.appStore?.GetAppOverviewByAppID(appid);
-    let image = null;
+    // Cover art: Steam's local library cache first (relative /assets/... URLs on
+    // steamloopback.host, served from disk) — right after resume the network is
+    // usually still down, so the online URL alone shows a broken image.
+    const images = [];
     try {
-        image = overview && window.appStore.GetVerticalCapsuleURLForApp(overview);
+        images.push(...(window.appStore.GetCachedVerticalCapsuleURL(overview) ?? []));
+    }
+    catch { }
+    try {
+        images.push(window.appStore.GetVerticalCapsuleURLForApp(overview));
     }
     catch { }
     const ctl = {
-        state: { phase: "waking", name: overview?.display_name ?? `app ${appid}`, image, status: "Waking the host PC…" },
+        state: { phase: "waking", name: overview?.display_name ?? `app ${appid}`, images: images.filter(Boolean), status: "Waking the host PC…" },
         listener: null, cancelled: false, closed: false, handle: null,
         set(patch) { this.state = { ...this.state, ...patch }; this.listener?.(this.state); },
         close() { if (!this.closed) { this.closed = true; this.handle?.Close(); } },

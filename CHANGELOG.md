@@ -1,10 +1,16 @@
 # Changelog
 
+## 0.8.1 — 2026-10-16
+Reconnect screen showed a broken cover image: it opens before the network is back after
+resume. Now uses Steam's local library-art cache first, then the online URL, and hides
+the picture if neither loads.
+tests: parse check + cached URL verified 200 on Deck; real cycle pending
+
 ## 0.8.0 — 2026-10-16
 Shows a blocking reconnect screen on resume: the game's cover, "Reconnecting to <game>",
 a spinner and live status (waking host → waiting for the game → starting the stream),
 with Cancel (or B) to abort, including a stream launch already handed to Steam.
-tests: parse check + load on Deck; real cycle pending
+tests: real cycle green (cover image broken → 0.8.1)
 
 ## 0.7.0 — 2026-10-16
 Reconnects the Remote Play stream after wake: the streamed game is read from Steam's
