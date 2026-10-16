@@ -46,6 +46,10 @@ WAKE_WINDOW_S = 60
 WAKE_RETRY_S = 3.0
 # How long the manual Sleep button waits for the host to actually go down.
 SLEEP_VERIFY_S = 30
+# Steam emits NotifyRequestSuspend twice per power-button press (~0.3 s apart,
+# observed 2026-10-16). A second sleep command must not go out: sol can replay it
+# on resume and put the host straight back to sleep (SR-G/sleep-on-lan #22).
+SUSPEND_DEDUPE_S = 20
 
 
 def _parse_mac(mac):
@@ -111,6 +115,7 @@ class Plugin:
         # Set when we sleep the host on suspend; gates the wake on resume.
         # In-memory only: the backend process survives Deck suspend.
         self.slept_host = False
+        self.last_suspend = None  # monotonic time of the last handled suspend
         self.debug_log = deque(maxlen=100)
         try:
             with open(SETTINGS_PATH) as f:
@@ -162,6 +167,11 @@ class Plugin:
 
     async def on_deck_suspend(self):
         self._dbg("suspend hook fired")
+        now = time.monotonic()
+        if self.last_suspend is not None and now - self.last_suspend < SUSPEND_DEDUPE_S:
+            self._dbg("suspend: duplicate notification, ignoring")
+            return {"ok": True, "skipped": True, "reason": "duplicate"}
+        self.last_suspend = now
         if not self.settings["sleep_on_suspend"]:
             self._dbg("suspend: sleep_on_suspend is off, skipping")
             return {"ok": True, "skipped": True, "reason": "disabled"}
