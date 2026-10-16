@@ -1,4 +1,4 @@
-# HostSleep — Decky plugin
+# Wake2Play — Decky plugin (formerly HostSleep)
 
 Sleep your Steam Remote Play **host PC** when the Steam Deck suspends, and wake it
 (Wake-on-LAN) when the Deck resumes — **without closing the running game**.
@@ -92,7 +92,7 @@ The panel's **Host PC** section shows live host status (Awake / Asleep) and the
 ## Deck setup
 
 1. Install the plugin (see Deploy below).
-2. With the PC on, open the HostSleep panel in Decky (⋯ menu) and pick the PC from the
+2. With the PC on, open the Wake2Play panel in Decky (⋯ menu) and pick the PC from the
    **Host** dropdown — it lists Steam's own Remote Play hosts (Settings → Remote Play);
    with a single host it's picked automatically. The plugin resolves the name on the LAN
    (mDNS/LLMNR, stock SteamOS), reads the MAC from sleep-on-lan's status page (or the
@@ -116,12 +116,12 @@ Prereq: SSH key access to the Deck (`deck@steamdeck.local` by default).
 ```
 
 Copies `main.py`, `package.json` and `dist/index.js` into the existing
-`/home/deck/homebrew/plugins/HostSleep` (files there are owned by `deck`, no sudo needed)
+`/home/deck/homebrew/plugins/Wake2Play` (files there are owned by `deck`, no sudo needed)
 and reloads the plugin through Steam's CEF debugger (`tools/cdp_eval.py`).
 
 ## Troubleshooting
 
-- Plugin logs: `/home/deck/homebrew/logs/HostSleep/` on the Deck.
+- Plugin logs: `/home/deck/homebrew/logs/Wake2Play/` on the Deck.
 - Buttons stopped working after a router/network change → update the host IP in the
   panel, then check the Windows network profile (see Host setup step 3).
 - Suspend fired but host didn't sleep → test `http://<host>:8009/sleep` from a browser

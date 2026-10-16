@@ -1,11 +1,17 @@
 # Changelog
 
+## 1.0.0 — 2026-10-16
+Renamed HostSleep → Wake2Play. Installed through Decky's own installer (the plugin folder
+is root-owned); settings are adopted from HostSleep on first run and saved under the new
+name, then HostSleep was uninstalled. `deploy.sh` now also builds `build/Wake2Play.zip`.
+tests: install + settings adoption verified on the Deck
+
 ## 0.9.0 — 2026-10-16
 Zero-config host setup: a Host dropdown lists Steam's own Remote Play hosts; picking one
 (automatic when there's only one) resolves its IP by name and its MAC from sleep-on-lan,
 and flags a missing sleep-on-lan. The IP is re-learned from the name whenever it moves,
 so router changes heal themselves. Manual fields moved under Advanced.
-tests: resolve/heal/not-found exercised live on the Deck; panel not yet seen by user
+tests: resolve/heal/not-found exercised live on the Deck; panel confirmed by user
 
 ## 0.8.1 — 2026-10-16
 Reconnect screen showed a broken cover image: it opens before the network is back after

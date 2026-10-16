@@ -10,6 +10,9 @@ from collections import deque
 import decky
 
 SETTINGS_PATH = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
+# The plugin was called HostSleep before 1.0; adopt its settings on first run
+LEGACY_SETTINGS_PATH = os.path.join(
+    os.path.dirname(decky.DECKY_PLUGIN_SETTINGS_DIR), "HostSleep", "settings.json")
 
 DEFAULTS = {
     # Steam's Remote Play name for the host (Settings → Remote Play). When set,
@@ -180,20 +183,26 @@ class Plugin:
         self.slept_appid = None  # game streaming when we slept the host
         self.last_suspend = None  # monotonic time of the last handled suspend
         self.debug_log = deque(maxlen=100)
+        path = SETTINGS_PATH
+        if not os.path.exists(path) and os.path.exists(LEGACY_SETTINGS_PATH):
+            path = LEGACY_SETTINGS_PATH
+            decky.logger.info("adopting settings from HostSleep")
         try:
-            with open(SETTINGS_PATH) as f:
+            with open(path) as f:
                 stored = json.load(f)
             self.settings.update({k: stored[k] for k in DEFAULTS if k in stored})
         except FileNotFoundError:
             pass
         except (json.JSONDecodeError, OSError) as e:
             decky.logger.error("Failed to load settings, using defaults: %s", e)
+        if path == LEGACY_SETTINGS_PATH:
+            self._save()  # own copy, so removing HostSleep can't take them along
         self._dbg("plugin loaded (host=%s mac=%s mode=%s)" % (
             self.settings["host_ip"], self.settings["mac"],
             self.settings["sleep_mode"]))
 
     async def _unload(self):
-        decky.logger.info("HostSleep unloaded")
+        decky.logger.info("Wake2Play unloaded")
 
     # ---- settings ----------------------------------------------------
 

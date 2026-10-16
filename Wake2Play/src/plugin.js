@@ -1,4 +1,4 @@
-// ---- HostSleep plugin (hand-maintained; no build step) ----------------------
+// ---- Wake2Play plugin (hand-maintained; no build step) ----------------------
 
 const getSettings = callable("get_settings");
 const saveSettings = callable("save_settings");
@@ -11,7 +11,7 @@ const onDeckResume = callable("on_deck_resume");
 const isStreaming = callable("is_streaming");
 const getDebugLog = callable("get_debug_log");
 const clearDebugLog = callable("clear_debug_log");
-const toast = (body) => toaster.toast({ title: "HostSleep", body });
+const toast = (body) => toaster.toast({ title: "Wake2Play", body });
 function describeWake(res) {
     if (!res.ok)
         return `Wake failed: ${res.error}`;
@@ -113,7 +113,7 @@ async function resumeStream(appid, ctl) {
         return;
     if (!client)
         return ctl.fail("The game isn't showing as running on the host — start the stream manually.");
-    console.log("HostSleep: StreamGame", appid, client.clientid, client.client_name);
+    console.log("Wake2Play: StreamGame", appid, client.clientid, client.client_name);
     ctl.set({ phase: "launching", status: `Starting the stream from ${client.client_name}…` });
     SteamClient.Apps.StreamGame(appid, client.clientid, -1);
     const deadline = Date.now() + STREAM_START_TIMEOUT_MS;
@@ -136,7 +136,7 @@ function getSteamHosts() {
             .map((d) => ({ name: d.clientName, online: d.status === "Connected" }));
     }
     catch (e) {
-        console.error("HostSleep: Remote Play host list unavailable:", e);
+        console.error("Wake2Play: Remote Play host list unavailable:", e);
         return [];
     }
 }
@@ -280,7 +280,7 @@ function registerSuspendHooks(onSuspend, onResume) {
         sleepManager = DFL.findModuleExport((m) => m?.RegisterForNotifyRequestSuspend && m?.RegisterForNotifyResumeFromSuspend);
     }
     catch (e) {
-        console.error("HostSleep: SleepManager lookup failed:", e);
+        console.error("Wake2Play: SleepManager lookup failed:", e);
     }
     if (sleepManager) {
         return [
@@ -304,10 +304,10 @@ var index = definePlugin(() => {
             if (!res.skipped)
                 suspendedAppid = res.resume_appid ?? null;
             if (!res.ok)
-                console.error("HostSleep: sleep on suspend failed:", res.error);
+                console.error("Wake2Play: sleep on suspend failed:", res.error);
         }
         catch (e) {
-            console.error("HostSleep: suspend hook error:", e);
+            console.error("Wake2Play: suspend hook error:", e);
         }
     }, async () => {
         if (resuming)
@@ -332,10 +332,10 @@ var index = definePlugin(() => {
             else if (!res.ok || res.confirmed === false)
                 toast(describeWake(res));
             else if (settings.debug)
-                toaster.toast({ title: "HostSleep debug", body: describeWake(res) });
+                toaster.toast({ title: "Wake2Play debug", body: describeWake(res) });
         }
         catch (e) {
-            console.error("HostSleep: resume hook error:", e);
+            console.error("Wake2Play: resume hook error:", e);
             ctl?.fail(`Something went wrong: ${e}`);
         }
         finally {
@@ -345,8 +345,8 @@ var index = definePlugin(() => {
     if (!regs)
         toast("Suspend/resume hooks unavailable in this Steam version — automation is off, buttons still work");
     return {
-        name: "HostSleep",
-        titleView: SP_JSX.jsx("div", { className: DFL.staticClasses.Title, children: "HostSleep" }),
+        name: "Wake2Play",
+        titleView: SP_JSX.jsx("div", { className: DFL.staticClasses.Title, children: "Wake2Play" }),
         content: SP_JSX.jsx(Content, {}),
         icon: SP_JSX.jsx(FaBed, {}),
         onDismount() {
