@@ -79,7 +79,7 @@ def _streaming_session():
     """The active Remote Play client session on the Deck, or None.
 
     Returns {"appid": int|None, "server": str|None} parsed from Steam's
-    streaming_client argv (--appid 1971650 --server 192.168.1.32:27031).
+    streaming_client argv (--appid 1971650 --server 192.168.1.10:27031).
     /proc/<pid>/comm truncates to 15 chars, so read cmdline and match the
     executable's basename against 'streaming_client'.
     """
