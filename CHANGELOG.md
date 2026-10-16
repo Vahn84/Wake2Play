@@ -4,7 +4,7 @@
 Reconnect screen showed a broken cover image: it opens before the network is back after
 resume. Now uses Steam's local library-art cache first, then the online URL, and hides
 the picture if neither loads.
-tests: parse check + cached URL verified 200 on Deck; real cycle pending
+tests: real cycle green
 
 ## 0.8.0 — 2026-10-16
 Shows a blocking reconnect screen on resume: the game's cover, "Reconnecting to <game>",
