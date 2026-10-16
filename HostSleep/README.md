@@ -87,12 +87,17 @@ The panel's **Host PC** section shows live host status (Awake / Asleep) and the
    suspend/resume cycle.
 5. Wake-on-LAN must already work (it does if MoonDeck wakes this PC): NIC power
    management → "Only allow a magic packet to wake the computer", wired Ethernet recommended.
-6. Give the PC a static IP or DHCP reservation.
+6. A static IP is no longer required: the plugin re-learns the PC's IP from its name.
 
 ## Deck setup
 
 1. Install the plugin (see Deploy below).
-2. Open the HostSleep panel in Decky (⋯ menu) and fill in the host's **MAC** and **IP**.
+2. With the PC on, open the HostSleep panel in Decky (⋯ menu) and pick the PC from the
+   **Host** dropdown — it lists Steam's own Remote Play hosts (Settings → Remote Play);
+   with a single host it's picked automatically. The plugin resolves the name on the LAN
+   (mDNS/LLMNR, stock SteamOS), reads the MAC from sleep-on-lan's status page (or the
+   Deck's ARP table) and tells you if sleep-on-lan is missing. Manual MAC/IP/port live
+   under **Advanced**; editing them by hand stops the automatic IP re-learning.
 3. Use the **Test** buttons to verify both directions before trusting the automation:
    - "Sleep host now" → PC should suspend, game still running after manual wake.
    - "Wake host now" → PC should wake.

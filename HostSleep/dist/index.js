@@ -90,6 +90,7 @@ const saveSettings = callable("save_settings");
 const wakeHost = callable("wake_host");
 const sleepHostVerified = callable("sleep_host_verified");
 const hostStatus = callable("host_status");
+const resolveHost = callable("resolve_host");
 const onDeckSuspend = callable("on_deck_suspend");
 const onDeckResume = callable("on_deck_resume");
 const isStreaming = callable("is_streaming");
@@ -209,17 +210,54 @@ async function resumeStream(appid, ctl) {
     if (!ctl.cancelled)
         ctl.fail("The stream didn't start — try streaming it from the library.");
 }
+// Remote Play hosts Steam itself has found on the LAN — the same list as
+// Settings → Remote Play. Hosts carry a clientId; paired client devices that
+// stream FROM this Deck carry a deviceId instead and are left out.
+function getSteamHosts() {
+    try {
+        const store = DFL.findModuleExport((m) => m && typeof m === "object" && "m_clientCaps" in m && "m_devices" in m);
+        return [...(store?.m_devices ?? [])]
+            .filter((d) => d.clientId && d.clientName)
+            .map((d) => ({ name: d.clientName, online: d.status === "Connected" }));
+    }
+    catch (e) {
+        console.error("HostSleep: Remote Play host list unavailable:", e);
+        return [];
+    }
+}
 function Content() {
     const [settings, setSettings] = SP_REACT.useState(null);
     const [streaming, setStreaming] = SP_REACT.useState(null);
     const [awake, setAwake] = SP_REACT.useState(undefined);
     const [busy, setBusy] = SP_REACT.useState(null);
     const [debugLog, setDebugLog] = SP_REACT.useState([]);
+    const [hosts] = SP_REACT.useState(getSteamHosts);
+    const [solFound, setSolFound] = SP_REACT.useState(null);
+    const [advanced, setAdvanced] = SP_REACT.useState(false);
+    const pickHost = async (name) => {
+        setBusy("pick");
+        try {
+            const res = await resolveHost(name);
+            if (!res.ok)
+                return toast(res.error);
+            setSolFound(res.sol);
+            setSettings(await getSettings());
+            toast(res.sol ? `${name} set up` : `${name} found, but sleep-on-lan isn't answering on it — Sleep won't work until it's installed`);
+        }
+        finally {
+            setBusy(null);
+            hostStatus().then((r) => setAwake(r.awake));
+        }
+    };
     SP_REACT.useEffect(() => {
         getSettings().then((s) => {
             setSettings(s);
             if (s.debug)
                 void getDebugLog().then(setDebugLog);
+            // Zero-config: exactly one host on the LAN and none chosen yet
+            const online = hosts.filter((h) => h.online);
+            if (!s.host_name && online.length === 1)
+                void pickHost(online[0].name);
         });
         isStreaming().then(setStreaming);
         // Live host status while the panel is open
@@ -253,6 +291,15 @@ function Content() {
     const row = (child) => SP_JSX.jsx(DFL.PanelSectionRow, { children: child });
     return SP_JSX.jsxs(SP_JSX.Fragment, { children: [
             SP_JSX.jsxs(DFL.PanelSection, { title: "Host PC", children: [
+                    hosts.length === 0 && !settings.host_name
+                        ? row(SP_JSX.jsx(DFL.Field, { label: "No Remote Play hosts found", description: "Turn on the PC and make sure Steam is running on it" }))
+                        : row(SP_JSX.jsx(DFL.DropdownItem, { label: "Host", disabled: busy !== null,
+                            description: busy === "pick" ? "Looking it up…"
+                                : settings.host_ip ? `${settings.host_ip} · ${settings.mac}` + (solFound === false ? " · sleep-on-lan missing" : "") : "Pick your gaming PC",
+                            rgOptions: (hosts.some((h) => h.name === settings.host_name) || !settings.host_name ? hosts : [...hosts, { name: settings.host_name, online: false }])
+                                .map((h) => ({ data: h.name, label: h.online ? h.name : `${h.name} (offline)` })),
+                            selectedOption: settings.host_name || null,
+                            onChange: (opt) => void pickHost(opt.data) })),
                     row(SP_JSX.jsx(DFL.Field, { label: "Status", children: statusLabel(awake) })),
                     row(SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy !== null,
                         onClick: () => void run("wake", "Waking host…", wakeHost, describeWake),
@@ -270,14 +317,15 @@ function Content() {
                         checked: settings.only_when_streaming, onChange: (v) => update({ only_when_streaming: v }) })),
                     row(SP_JSX.jsx(DFL.ToggleField, { label: "Reconnect the stream after wake", description: "Restart Remote Play of the game you were streaming once the host is back", checked: settings.resume_stream, onChange: (v) => update({ resume_stream: v }) })),
                 ] }),
-            SP_JSX.jsxs(DFL.PanelSection, { title: "Host settings", children: [
-                    row(SP_JSX.jsx(DFL.TextField, { label: "MAC address", description: "e.g. AA:BB:CC:DD:EE:FF", value: settings.mac, onChange: (e) => update({ mac: e.target.value }) })),
-                    row(SP_JSX.jsx(DFL.TextField, { label: "IP address", description: "Static IP or DHCP reservation recommended", value: settings.host_ip, onChange: (e) => update({ host_ip: e.target.value }) })),
-                    row(SP_JSX.jsx(DFL.DropdownItem, { label: "Sleep command", rgOptions: [
+            SP_JSX.jsxs(DFL.PanelSection, { title: "Advanced", children: [
+                    row(SP_JSX.jsx(DFL.ToggleField, { label: "Show manual host settings", description: "Only needed if the host isn't in the list above", checked: advanced, onChange: setAdvanced })),
+                    advanced && row(SP_JSX.jsx(DFL.TextField, { label: "MAC address", description: "e.g. AA:BB:CC:DD:EE:FF", value: settings.mac, onChange: (e) => update({ mac: e.target.value, host_name: "" }) })),
+                    advanced && row(SP_JSX.jsx(DFL.TextField, { label: "IP address", description: "Static IP or DHCP reservation recommended", value: settings.host_ip, onChange: (e) => update({ host_ip: e.target.value, host_name: "" }) })),
+                    advanced && row(SP_JSX.jsx(DFL.DropdownItem, { label: "Sleep command", rgOptions: [
                             { data: "http", label: "HTTP (sleep-on-lan REST)" },
                             { data: "udp", label: "UDP reversed-MAC packet" },
                         ], selectedOption: settings.sleep_mode, onChange: (opt) => update({ sleep_mode: opt.data }) })),
-                    settings.sleep_mode === "http" && row(SP_JSX.jsx(DFL.TextField, { label: "sleep-on-lan HTTP port", value: String(settings.sleep_port), onChange: (e) => {
+                    advanced && settings.sleep_mode === "http" && row(SP_JSX.jsx(DFL.TextField, { label: "sleep-on-lan HTTP port", value: String(settings.sleep_port), onChange: (e) => {
                             const port = parseInt(e.target.value, 10);
                             if (!isNaN(port))
                                 update({ sleep_port: port });

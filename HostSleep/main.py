@@ -12,6 +12,9 @@ import decky
 SETTINGS_PATH = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
 
 DEFAULTS = {
+    # Steam's Remote Play name for the host (Settings → Remote Play). When set,
+    # host_ip is re-learned from it, so a router handing out a new IP heals itself.
+    "host_name": "",
     "mac": "",
     "host_ip": "",
     "broadcast_ip": "255.255.255.255",
@@ -35,6 +38,9 @@ DEFAULTS = {
 MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
 # Only plain IPs/hostnames may be interpolated into the sleep URL
 HOST_RE = re.compile(r"^[A-Za-z0-9.\-]+$")
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,252}$")
+# One line per interface on sol's status page (GET http://host:8009/)
+SOL_HOST_RE = re.compile(r'<host ip="([0-9.]+)/\d+" mac="([0-9A-Fa-f:]{17})"')
 
 # The host counts as awake when its Steam client accepts TCP on the Remote Play
 # port. Unlike ping/ARP this can't be faked by a sleeping NIC's ARP offload, needs
@@ -116,6 +122,49 @@ async def _host_awake(host):
     return True
 
 
+async def _resolve_name(name, timeout=2.0):
+    """IPv4 of a LAN host by name, or None.
+
+    Stock SteamOS resolves bare and .local names over mDNS/LLMNR, which Windows
+    answers by default — no DNS server or static entry needed.
+    """
+    def lookup():
+        names = [name] if name.endswith(".local") else [name, f"{name}.local"]
+        for n in names:
+            try:
+                return socket.getaddrinfo(n, None, socket.AF_INET)[0][4][0]
+            except OSError:
+                continue
+        return None
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(lookup), timeout)
+    except asyncio.TimeoutError:
+        return None
+
+
+def _sol_status(ip, port):
+    """sleep-on-lan's XML status page, or None if sol isn't answering."""
+    try:
+        with urllib.request.urlopen(f"http://{ip}:{port}/", timeout=2) as resp:
+            body = resp.read(65536).decode(errors="replace")
+    except Exception:
+        return None
+    return body if "sleep-on-lan" in body else None
+
+
+def _arp_mac(ip):
+    """MAC for ip from the Deck's neighbour table, or None."""
+    try:
+        with open("/proc/net/arp") as f:
+            for line in f.readlines()[1:]:
+                cols = line.split()
+                if cols[0] == ip and cols[2] != "0x0" and cols[3] != "00:00:00:00:00:00":
+                    return cols[3]
+    except OSError:
+        pass
+    return None
+
+
 class Plugin:
     def _dbg(self, msg):
         # Ring buffer surfaced in the panel's Debug section; always recorded
@@ -153,6 +202,9 @@ class Plugin:
 
     async def save_settings(self, settings):
         self.settings.update({k: settings[k] for k in DEFAULTS if k in settings})
+        return self._save()
+
+    def _save(self):
         os.makedirs(decky.DECKY_PLUGIN_SETTINGS_DIR, exist_ok=True)
         with open(SETTINGS_PATH, "w") as f:
             json.dump(self.settings, f, indent=2)
@@ -175,7 +227,51 @@ class Plugin:
     async def host_status(self):
         """{"awake": bool} or {"awake": None} when no host IP is configured."""
         host = self._host()
-        return {"awake": await _host_awake(host) if host else None}
+        if host and await _host_awake(host):
+            return {"awake": True}
+        if await self._refresh_ip():
+            return {"awake": await _host_awake(self._host())}
+        return {"awake": False if host else None}
+
+    async def _refresh_ip(self):
+        """Re-learn host_ip from host_name; True if it changed."""
+        name = (self.settings["host_name"] or "").strip()
+        if not NAME_RE.match(name):
+            return False
+        ip = await _resolve_name(name, timeout=1.5)
+        if not ip or ip == self.settings["host_ip"]:
+            return False
+        self._dbg(f"host {name} moved: {self.settings['host_ip']} -> {ip}")
+        self.settings["host_ip"] = ip
+        self._save()
+        return True
+
+    async def resolve_host(self, name):
+        """Configure the host from its Steam name: learn IP and MAC.
+
+        The host must be awake. MAC comes from sol's status page when sol is
+        installed (also proving sleep will work), else from the Deck's ARP table.
+        """
+        name = (name or "").strip()
+        if not NAME_RE.match(name):
+            return {"ok": False, "error": f"Invalid host name: {name!r}"}
+        ip = await _resolve_name(name)
+        if not ip:
+            return {"ok": False, "error": f"{name} not found on the network — is it on?"}
+        port = int(self.settings["sleep_port"] or 8009)
+        status = await asyncio.to_thread(_sol_status, ip, port)
+        mac = next((m for i, m in SOL_HOST_RE.findall(status or "") if i == ip), None)
+        if not mac:
+            await _host_awake(ip)  # any traffic fills the ARP cache
+            mac = _arp_mac(ip)
+        if not mac:
+            return {"ok": False, "error": f"Found {name} at {ip} but couldn't learn its MAC — is it on the same network?"}
+        self.settings.update(host_name=name, host_ip=ip, mac=mac.upper())
+        if status:
+            self.settings["sleep_mode"] = "http"
+        self._save()
+        self._dbg(f"host set: {name} {ip} {mac} (sleep-on-lan {'found' if status else 'NOT found'})")
+        return {"ok": True, "ip": ip, "mac": mac.upper(), "sol": bool(status)}
 
     # ---- suspend/resume hooks (respect the toggles) --------------------
 
@@ -257,6 +353,10 @@ class Plugin:
             if host and await _host_awake(host):
                 confirmed = True
                 break
+            # The host may have come back on a new IP; re-learn it by name
+            if host and attempts % 3 == 2 and await self._refresh_ip():
+                host = self._host()
+                continue
             attempts += 1
             try:
                 _send_udp(packet, targets)
@@ -298,6 +398,7 @@ class Plugin:
         return {"ok": True, "confirmed": False, "elapsed_s": SLEEP_VERIFY_S}
 
     async def sleep_host(self):
+        await self._refresh_ip()
         if self.settings["sleep_mode"] == "udp":
             return await self._sleep_udp()
         return await self._sleep_http()
