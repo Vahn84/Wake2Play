@@ -124,26 +124,80 @@ function statusLabel(awake) {
     return awake ? "🟢 Awake" : "⚫ Asleep / off";
 }
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+const STREAM_START_TIMEOUT_MS = 45000;
+// Full-screen reconnect dialog. It is driven from outside (the resume hook) via
+// a small controller: ctl.set(patch) re-renders, ctl.cancelled is set by the
+// Cancel button or B, and ctl.close() dismisses it.
+function ReconnectModal({ ctl }) {
+    const [st, setSt] = SP_REACT.useState(ctl.state);
+    SP_REACT.useEffect(() => { ctl.listener = setSt; return () => { ctl.listener = null; }; }, []);
+    const failed = st.phase === "failed";
+    return SP_JSX.jsx(DFL.ModalRoot, { bAllowFullSize: true, onCancel: () => ctl.cancel(),
+        children: SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: "18px", padding: "12px 0", textAlign: "center" }, children: [
+                st.image && SP_JSX.jsx("img", { src: st.image, style: { height: "220px", borderRadius: "6px", boxShadow: "0 6px 24px rgba(0,0,0,.6)" } }),
+                SP_JSX.jsx("div", { style: { fontSize: "24px", fontWeight: "bold" }, children: failed ? `Couldn't reconnect to ${st.name}` : `Reconnecting to ${st.name}` }),
+                !failed && SP_JSX.jsx(DFL.SteamSpinner, { style: { height: "64px" } }),
+                SP_JSX.jsx("div", { style: { fontSize: "16px", opacity: 0.8 }, children: st.status }),
+                SP_JSX.jsx(DFL.DialogButton, { style: { width: "240px" }, onClick: () => ctl.cancel(), children: failed ? "Close" : "Cancel" }),
+            ] }) });
+}
+function openReconnectModal(appid) {
+    const overview = window.appStore?.GetAppOverviewByAppID(appid);
+    let image = null;
+    try {
+        image = overview && window.appStore.GetVerticalCapsuleURLForApp(overview);
+    }
+    catch { }
+    const ctl = {
+        state: { phase: "waking", name: overview?.display_name ?? `app ${appid}`, image, status: "Waking the host PC…" },
+        listener: null, cancelled: false, closed: false, handle: null,
+        set(patch) { this.state = { ...this.state, ...patch }; this.listener?.(this.state); },
+        close() { if (!this.closed) { this.closed = true; this.handle?.Close(); } },
+        cancel() {
+            const wasFailed = this.state.phase === "failed";
+            this.cancelled = true;
+            // A launch already handed to Steam is aborted the way Steam's own
+            // prelaunch dialogs do it.
+            if (this.state.phase === "launching")
+                SteamClient.Streaming.CancelStreamGame();
+            this.close();
+            if (!wasFailed)
+                toast("Reconnection cancelled — the host stays awake");
+        },
+        fail(status) { this.set({ phase: "failed", status }); },
+    };
+    ctl.handle = DFL.showModal(SP_JSX.jsx(ReconnectModal, { ctl }));
+    return ctl;
+}
 // Restart the Remote Play stream of appid, exactly like the library's Stream
 // button (SteamClient.Apps.StreamGame(appid, hostClientId, -1)). Steam on the
 // Deck rediscovers the woken host a few seconds after it's reachable, so wait
-// until it lists the game as running (display_status 4) on a remote client.
-async function resumeStream(appid) {
+// until it lists the game as running (display_status 4) on a remote client,
+// then until the stream process is actually up.
+async function resumeStream(appid, ctl) {
     const overview = () => window.appStore?.GetAppOverviewByAppID(appid);
-    const name = overview()?.display_name ?? `app ${appid}`;
-    toast(`Reconnecting to ${name}…`);
+    ctl.set({ phase: "waiting", status: "Host is awake — waiting for Steam to see the game…" });
     let client = null;
-    for (let i = 0; i < 30 && !client; i++) {
+    for (let i = 0; i < 30 && !client && !ctl.cancelled; i++) {
         client = (overview()?.per_client_data ?? []).find((c) => c.clientid !== "0" && c.display_status === 4);
         if (!client)
             await delay(1000);
     }
-    if (!client) {
-        toast(`${name} isn't showing as running on the host — start the stream manually`);
+    if (ctl.cancelled)
         return;
-    }
+    if (!client)
+        return ctl.fail("The game isn't showing as running on the host — start the stream manually.");
     console.log("HostSleep: StreamGame", appid, client.clientid, client.client_name);
+    ctl.set({ phase: "launching", status: `Starting the stream from ${client.client_name}…` });
     SteamClient.Apps.StreamGame(appid, client.clientid, -1);
+    const deadline = Date.now() + STREAM_START_TIMEOUT_MS;
+    while (Date.now() < deadline && !ctl.cancelled) {
+        if (await isStreaming())
+            return ctl.close();
+        await delay(1000);
+    }
+    if (!ctl.cancelled)
+        ctl.fail("The stream didn't start — try streaming it from the library.");
 }
 function Content() {
     const [settings, setSettings] = SP_REACT.useState(null);
@@ -269,9 +323,13 @@ function registerSuspendHooks(onSuspend, onResume) {
 }
 var index = definePlugin(() => {
     let resuming = false;
+    let suspendedAppid = null; // game streaming when we slept the host
     const regs = registerSuspendHooks(async () => {
         try {
             const res = await onDeckSuspend();
+            // Second (duplicate) notification must not clear the first's appid
+            if (!res.skipped)
+                suspendedAppid = res.resume_appid ?? null;
             if (!res.ok)
                 console.error("HostSleep: sleep on suspend failed:", res.error);
         }
@@ -282,19 +340,30 @@ var index = definePlugin(() => {
         if (resuming)
             return; // one wake loop at a time
         resuming = true;
+        // Up immediately, before the (up to 60 s) wake, so the user isn't left
+        // poking at a library with no stream
+        const ctl = suspendedAppid ? openReconnectModal(suspendedAppid) : null;
+        suspendedAppid = null;
         try {
             const res = await onDeckResume();
             const settings = await getSettings();
+            if (ctl && !ctl.cancelled) {
+                if (res.resume_appid)
+                    await resumeStream(res.resume_appid, ctl);
+                else if (!res.ok || res.confirmed === false)
+                    ctl.fail(describeWake(res));
+                else
+                    ctl.close(); // stream came back by itself
+            }
             // Failures and no-confirmation are actionable even outside debug mode
-            if (!res.ok || res.confirmed === false)
+            else if (!res.ok || res.confirmed === false)
                 toast(describeWake(res));
             else if (settings.debug)
                 toaster.toast({ title: "HostSleep debug", body: describeWake(res) });
-            if (res.resume_appid)
-                await resumeStream(res.resume_appid);
         }
         catch (e) {
             console.error("HostSleep: resume hook error:", e);
+            ctl?.fail(`Something went wrong: ${e}`);
         }
         finally {
             resuming = false;

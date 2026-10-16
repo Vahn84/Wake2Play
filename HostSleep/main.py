@@ -196,6 +196,9 @@ class Plugin:
         result = await self.sleep_host()
         self.slept_host = result.get("ok", False)
         self.slept_appid = session["appid"] if session and self.slept_host else None
+        # Lets the UI put up the reconnect screen as soon as the Deck resumes
+        if self.slept_appid and self.settings["resume_stream"]:
+            result["resume_appid"] = self.slept_appid
         return result
 
     async def on_deck_resume(self):
