@@ -25,6 +25,9 @@ DEFAULTS = {
     # Gate on an active Remote Play client session: only sleep the host if the
     # Deck is streaming at suspend time, and only wake it if we slept it.
     "only_when_streaming": True,
+    # After a confirmed wake, restart the Remote Play stream of the game that was
+    # streaming when the Deck suspended (the game is still running on the host).
+    "resume_stream": True,
     # Show the event log in the plugin panel and toast debug info on resume
     "debug": False,
 }
@@ -63,9 +66,11 @@ def _magic_packet(mac_bytes):
     return b"\xff" * 6 + mac_bytes * 16
 
 
-def _is_streaming():
-    """True if Steam's Remote Play client process is running on the Deck.
+def _streaming_session():
+    """The active Remote Play client session on the Deck, or None.
 
+    Returns {"appid": int|None, "server": str|None} parsed from Steam's
+    streaming_client argv (--appid 1971650 --server 192.168.1.32:27031).
     /proc/<pid>/comm truncates to 15 chars, so read cmdline and match the
     executable's basename against 'streaming_client'.
     """
@@ -74,12 +79,20 @@ def _is_streaming():
             continue
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as f:
-                argv0 = f.read().split(b"\x00", 1)[0]
+                argv = f.read().decode(errors="replace").split("\x00")
         except OSError:
             continue
-        if os.path.basename(argv0.decode(errors="replace")) == "streaming_client":
-            return True
-    return False
+        if os.path.basename(argv[0]) != "streaming_client":
+            continue
+        opts = dict(zip(argv, argv[1:]))
+        appid = opts.get("--appid", "")
+        return {"appid": int(appid) if appid.isdigit() else None,
+                "server": opts.get("--server", "").rsplit(":", 1)[0] or None}
+    return None
+
+
+def _is_streaming():
+    return _streaming_session() is not None
 
 
 def _send_udp(packet, targets):
@@ -115,6 +128,7 @@ class Plugin:
         # Set when we sleep the host on suspend; gates the wake on resume.
         # In-memory only: the backend process survives Deck suspend.
         self.slept_host = False
+        self.slept_appid = None  # game streaming when we slept the host
         self.last_suspend = None  # monotonic time of the last handled suspend
         self.debug_log = deque(maxlen=100)
         try:
@@ -175,13 +189,13 @@ class Plugin:
         if not self.settings["sleep_on_suspend"]:
             self._dbg("suspend: sleep_on_suspend is off, skipping")
             return {"ok": True, "skipped": True, "reason": "disabled"}
-        if self.settings["only_when_streaming"]:
-            streaming = _is_streaming()
-            self._dbg(f"suspend: Remote Play session {'active' if streaming else 'not found'}")
-            if not streaming:
-                return {"ok": True, "skipped": True, "reason": "not streaming"}
+        session = _streaming_session()
+        self._dbg(f"suspend: Remote Play session {session or 'not found'}")
+        if self.settings["only_when_streaming"] and not session:
+            return {"ok": True, "skipped": True, "reason": "not streaming"}
         result = await self.sleep_host()
         self.slept_host = result.get("ok", False)
+        self.slept_appid = session["appid"] if session and self.slept_host else None
         return result
 
     async def on_deck_resume(self):
@@ -193,7 +207,15 @@ class Plugin:
             self._dbg("resume: host was not slept by us, skipping wake")
             return {"ok": True, "skipped": True, "reason": "host not slept by plugin"}
         self.slept_host = False
-        return await self.wake_host()
+        appid, self.slept_appid = self.slept_appid, None
+        result = await self.wake_host()
+        if result.get("confirmed") and appid and self.settings["resume_stream"]:
+            if _is_streaming():
+                self._dbg("resume: stream already reconnected by itself")
+            else:
+                result["resume_appid"] = appid
+                self._dbg(f"resume: asking the UI to restart the stream of app {appid}")
+        return result
 
     # ---- actions (unconditional; also used by the panel buttons) -------
 

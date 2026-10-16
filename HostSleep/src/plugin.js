@@ -38,6 +38,28 @@ function statusLabel(awake) {
         return "set the host IP below";
     return awake ? "🟢 Awake" : "⚫ Asleep / off";
 }
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+// Restart the Remote Play stream of appid, exactly like the library's Stream
+// button (SteamClient.Apps.StreamGame(appid, hostClientId, -1)). Steam on the
+// Deck rediscovers the woken host a few seconds after it's reachable, so wait
+// until it lists the game as running (display_status 4) on a remote client.
+async function resumeStream(appid) {
+    const overview = () => window.appStore?.GetAppOverviewByAppID(appid);
+    const name = overview()?.display_name ?? `app ${appid}`;
+    toast(`Reconnecting to ${name}…`);
+    let client = null;
+    for (let i = 0; i < 30 && !client; i++) {
+        client = (overview()?.per_client_data ?? []).find((c) => c.clientid !== "0" && c.display_status === 4);
+        if (!client)
+            await delay(1000);
+    }
+    if (!client) {
+        toast(`${name} isn't showing as running on the host — start the stream manually`);
+        return;
+    }
+    console.log("HostSleep: StreamGame", appid, client.clientid, client.client_name);
+    SteamClient.Apps.StreamGame(appid, client.clientid, -1);
+}
 function Content() {
     const [settings, setSettings] = SP_REACT.useState(null);
     const [streaming, setStreaming] = SP_REACT.useState(null);
@@ -97,6 +119,7 @@ function Content() {
                         description: "Sleep only if a Remote Play session is active; wake only if the host was slept by this plugin." +
                             (streaming === null ? "" : ` Remote Play now: ${streaming ? "active" : "none"}`),
                         checked: settings.only_when_streaming, onChange: (v) => update({ only_when_streaming: v }) })),
+                    row(SP_JSX.jsx(DFL.ToggleField, { label: "Reconnect the stream after wake", description: "Restart Remote Play of the game you were streaming once the host is back", checked: settings.resume_stream, onChange: (v) => update({ resume_stream: v }) })),
                 ] }),
             SP_JSX.jsxs(DFL.PanelSection, { title: "Host settings", children: [
                     row(SP_JSX.jsx(DFL.TextField, { label: "MAC address", description: "e.g. AA:BB:CC:DD:EE:FF", value: settings.mac, onChange: (e) => update({ mac: e.target.value }) })),
@@ -182,6 +205,8 @@ var index = definePlugin(() => {
                 toast(describeWake(res));
             else if (settings.debug)
                 toaster.toast({ title: "HostSleep debug", body: describeWake(res) });
+            if (res.resume_appid)
+                await resumeStream(res.resume_appid);
         }
         catch (e) {
             console.error("HostSleep: resume hook error:", e);
