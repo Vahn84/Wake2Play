@@ -62,6 +62,10 @@ SLEEP_VERIFY_S = 30
 # observed 2026-10-16). A second sleep command must not go out: sol can replay it
 # on resume and put the host straight back to sleep (SR-G/sleep-on-lan #22).
 SUSPEND_DEDUPE_S = 20
+# After resume a docked Deck brings Wi-Fi up seconds before the dock's Ethernet;
+# a stream restarted in that gap runs over Wi-Fi and dies when the default route
+# switches to the cable (observed 2026-10-17). Wait this long, at most, for it.
+WIRED_SETTLE_S = 25
 
 
 def _parse_mac(mac):
@@ -168,6 +172,16 @@ def _arp_mac(ip):
     return None
 
 
+def _wired_with_route():
+    """Wired NICs (en*/eth*) that currently hold an IPv4 default route."""
+    try:
+        with open("/proc/net/route") as f:
+            return {c[0] for c in (l.split() for l in f.readlines()[1:])
+                    if c[1] == "00000000" and c[0].startswith(("en", "eth"))}
+    except OSError:
+        return set()
+
+
 class Plugin:
     def _dbg(self, msg):
         # Ring buffer surfaced in the panel's Debug section; always recorded
@@ -181,6 +195,7 @@ class Plugin:
         # In-memory only: the backend process survives Deck suspend.
         self.slept_host = False
         self.slept_appid = None  # game streaming when we slept the host
+        self.docked = False  # Deck was on a wired connection when it suspended
         self.last_suspend = None  # monotonic time of the last handled suspend
         self.debug_log = deque(maxlen=100)
         path = SETTINGS_PATH
@@ -286,11 +301,14 @@ class Plugin:
 
     async def on_deck_suspend(self):
         self._dbg("suspend hook fired")
+        # monotonic deliberately: it doesn't advance while the Deck sleeps, so the
+        # stale suspend notification Steam re-delivers on wake reads as a repeat
         now = time.monotonic()
         if self.last_suspend is not None and now - self.last_suspend < SUSPEND_DEDUPE_S:
             self._dbg("suspend: duplicate notification, ignoring")
             return {"ok": True, "skipped": True, "reason": "duplicate"}
         self.last_suspend = now
+        self.docked = bool(_wired_with_route())
         if not self.settings["sleep_on_suspend"]:
             self._dbg("suspend: sleep_on_suspend is off, skipping")
             return {"ok": True, "skipped": True, "reason": "disabled"}
@@ -321,6 +339,7 @@ class Plugin:
             if _is_streaming():
                 self._dbg("resume: stream already reconnected by itself")
             else:
+                await self._wait_for_wired()
                 result["resume_appid"] = appid
                 self._dbg(f"resume: asking the UI to restart the stream of app {appid}")
         return result
@@ -387,6 +406,19 @@ class Plugin:
             return {"ok": False, "error": "network unreachable for the whole wake window"}
         self._dbg(f"wake: NO confirmation after {elapsed}s ({attempts} packets, {send_errors} send errors)")
         return {"ok": True, "confirmed": confirmed, "elapsed_s": elapsed, "attempts": attempts}
+
+    async def _wait_for_wired(self):
+        """If we suspended docked, wait for the cable to get its route back."""
+        if not self.docked:
+            return
+        started = time.monotonic()
+        while time.monotonic() - started < WIRED_SETTLE_S:
+            if _wired_with_route():
+                await asyncio.sleep(1)  # let the route switch land
+                self._dbg(f"resume: wired network back after {round(time.monotonic() - started, 1)}s")
+                return
+            await asyncio.sleep(0.5)
+        self._dbg(f"resume: wired network NOT back after {WIRED_SETTLE_S}s, going ahead")
 
     async def sleep_host_verified(self):
         """Manual Sleep button: send the command, then watch the host go down."""

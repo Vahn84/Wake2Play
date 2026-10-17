@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 — 2026-10-17
+Stream reconnect broke when the host was already awake: the stream restarted over Wi-Fi
+3 s after resume and died 2 s later when the dock's Ethernet came up and took the route.
+If the Deck suspended docked, wait (≤25 s) for the cable's route before restarting; and
+only count a stream as reconnected after it has held 5 s, retrying once if it drops.
+tests: parse check + wired detection verified on the Deck; real cycle pending
+
 ## 1.0.0 — 2026-10-16
 Renamed HostSleep → Wake2Play. Installed through Decky's own installer (the plugin folder
 is root-owned); settings are adopted from HostSleep on first run and saved under the new

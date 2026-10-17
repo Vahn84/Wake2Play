@@ -41,6 +41,9 @@ function statusLabel(awake) {
 }
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 const STREAM_START_TIMEOUT_MS = 45000;
+// A stream only counts as reconnected once it has stayed up this long: right
+// after resume one can start and die within seconds (network still settling).
+const STREAM_STABLE_MS = 5000;
 // Full-screen reconnect dialog. It is driven from outside (the resume hook) via
 // a small controller: ctl.set(patch) re-renders, ctl.cancelled is set by the
 // Cancel button or B, and ctl.close() dismisses it.
@@ -113,14 +116,26 @@ async function resumeStream(appid, ctl) {
         return;
     if (!client)
         return ctl.fail("The game isn't showing as running on the host — start the stream manually.");
-    console.log("Wake2Play: StreamGame", appid, client.clientid, client.client_name);
-    ctl.set({ phase: "launching", status: `Starting the stream from ${client.client_name}…` });
-    SteamClient.Apps.StreamGame(appid, client.clientid, -1);
-    const deadline = Date.now() + STREAM_START_TIMEOUT_MS;
-    while (Date.now() < deadline && !ctl.cancelled) {
-        if (await isStreaming())
-            return ctl.close();
-        await delay(1000);
+    for (let attempt = 1; attempt <= 2 && !ctl.cancelled; attempt++) {
+        console.log("Wake2Play: StreamGame", appid, client.clientid, client.client_name, "attempt", attempt);
+        ctl.set({ phase: "launching", status: attempt === 1 ? `Starting the stream from ${client.client_name}…` : "The stream dropped — trying again…" });
+        SteamClient.Apps.StreamGame(appid, client.clientid, -1);
+        let upSince = null;
+        const deadline = Date.now() + STREAM_START_TIMEOUT_MS;
+        while (Date.now() < deadline && !ctl.cancelled) {
+            if (await isStreaming()) {
+                upSince ??= Date.now();
+                if (Date.now() - upSince >= STREAM_STABLE_MS)
+                    return ctl.close();
+            }
+            else if (upSince !== null)
+                break; // came up, then died: retry
+            await delay(1000);
+        }
+        if (upSince === null)
+            break; // never came up at all: retrying blind won't help
+        console.log("Wake2Play: stream dropped after starting");
+        await delay(2000);
     }
     if (!ctl.cancelled)
         ctl.fail("The stream didn't start — try streaming it from the library.");
