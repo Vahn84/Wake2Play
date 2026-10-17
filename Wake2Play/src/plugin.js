@@ -55,10 +55,14 @@ function ReconnectModal({ ctl }) {
     SP_REACT.useEffect(() => { ctl.listener = setSt; return () => { ctl.listener = null; }; }, []);
     const failed = st.phase === "failed";
     return SP_JSX.jsx(DFL.ModalRoot, { bAllowFullSize: true, onCancel: () => ctl.cancel(),
-        children: SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: "18px", padding: "12px 0", textAlign: "center" }, children: [
-                image && SP_JSX.jsx("img", { src: image, onError: () => setImgIdx((i) => i + 1), style: { height: "220px", borderRadius: "6px", boxShadow: "0 6px 24px rgba(0,0,0,.6)" } }),
-                SP_JSX.jsx("div", { style: { fontSize: "24px", fontWeight: "bold" }, children: failed ? `Couldn't reconnect to ${st.name}` : `Reconnecting to ${st.name}` }),
-                !failed && SP_JSX.jsx(DFL.SteamSpinner, { style: { height: "64px" } }),
+        // Sized off the viewport height: the Deck's own screen is only ~534 CSS px
+        // tall (1280x800 at 1.5x), and fixed sizes pushed the cover off the top.
+        children: SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: "min(18px, 2.4vh)", padding: "min(12px, 1.5vh) 0", textAlign: "center" }, children: [
+                image && SP_JSX.jsx("img", { src: image, onError: () => setImgIdx((i) => i + 1), style: { height: "min(220px, 30vh)", borderRadius: "6px", boxShadow: "0 6px 24px rgba(0,0,0,.6)" } }),
+                SP_JSX.jsx("div", { style: { fontSize: "min(24px, 3.8vh)", fontWeight: "bold" }, children: failed ? `Couldn't reconnect to ${st.name}` : `Reconnecting to ${st.name}` }),
+                // SteamSpinner ignores size props and always lays out at ~140px; zoom
+                // shrinks its layout box too (transform wouldn't)
+                !failed && SP_JSX.jsx("div", { style: { zoom: 0.45 }, children: SP_JSX.jsx(DFL.SteamSpinner, {}) }),
                 SP_JSX.jsx("div", { style: { fontSize: "16px", opacity: 0.8 }, children: st.status }),
                 SP_JSX.jsx(DFL.DialogButton, { style: { width: "240px" }, onClick: () => ctl.cancel(), children: failed ? "Close" : "Cancel" }),
             ] }) });

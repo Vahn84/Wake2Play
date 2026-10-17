@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 — 2026-10-17
+Reconnect screen cut the cover off in handheld mode: its content was 546 px tall on a
+534 px (1280×800 @1.5×) screen, mostly Steam's spinner, which ignores size props and
+lays out at 140 px. Cover, title and gaps now scale with screen height and the spinner
+is zoomed down; the whole dialog measures 437 px at handheld sizes.
+tests: measured on the Deck at handheld-equivalent sizes; not yet seen in handheld
+
 ## 1.0.1 — 2026-10-17
 Stream reconnect broke when the host was already awake: the stream restarted over Wi-Fi
 3 s after resume and died 2 s later when the dock's Ethernet came up and took the route.
