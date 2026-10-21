@@ -247,15 +247,18 @@ async function restartStreamForControllers() {
 }
 // Steam on the Deck has no "disconnect": its "Exit game" quits the game on the PC.
 // Same cut as the restart, without reconnecting.
+// True when the stream was cut.
 async function disconnectStream() {
     if (restartingStream)
-        return;
+        return false;
     try {
         const res = await stopStream();
         toast(res.ok ? "Disconnected — the game keeps running on the PC" : `Couldn't disconnect: ${res.error}`);
+        return !!res.ok;
     }
     catch (e) {
         toast(`Couldn't disconnect: ${e}`);
+        return false;
     }
 }
 // Which controllers, in which player order. Waits for it to settle (a controller
@@ -433,6 +436,9 @@ function Content() {
                     row(SP_JSX.jsx(DFL.ToggleField, { label: "Offer a stream restart when controllers change", description: "A running game ignores controllers that join or swap mid-stream; restarting the stream fixes it (the game keeps running)", checked: settings.offer_stream_restart, onChange: (v) => update({ offer_stream_restart: v }) })),
                     row(SP_JSX.jsx(DFL.ToggleField, { label: "Reconnect the stream after wake", description: "Restart Remote Play of the game you were streaming once the host is back", checked: settings.resume_stream, onChange: (v) => update({ resume_stream: v }) })),
                 ] }),
+            SP_JSX.jsxs(DFL.PanelSection, { title: "Steam menus", children: [
+                    row(SP_JSX.jsx(DFL.ToggleField, { label: "Show buttons in Steam's menus", description: "Wake PC / Sleep PC on the game pages of games on the host; \"Disconnect\" items in the in-game Steam menu while streaming", checked: settings.show_menu_buttons, onChange: (v) => { update({ show_menu_buttons: v }); setMenuPatches(v); } })),
+                ] }),
             SP_JSX.jsxs(DFL.PanelSection, { title: "Advanced", children: [
                     row(SP_JSX.jsx(DFL.ToggleField, { label: "Show manual host settings", description: "Only needed if the host isn't in the list above", checked: advanced, onChange: setAdvanced })),
                     advanced && row(SP_JSX.jsx(DFL.TextField, { label: "MAC address", description: "e.g. AA:BB:CC:DD:EE:FF", value: settings.mac, onChange: (e) => update({ mac: e.target.value, host_name: "" }) })),
@@ -549,6 +555,9 @@ var index = definePlugin(() => {
         }
     });
     const stopChangeWatch = watchControllerChanges(() => resuming);
+    let dismounted = false;
+    getSettings().then((s) => { if (!dismounted && s.show_menu_buttons)
+        setMenuPatches(true); }, (e) => console.error("Wake2Play: menu patches not applied:", e));
     if (!regs)
         toast("Suspend/resume hooks unavailable in this Steam version — automation is off, buttons still work");
     return {
@@ -560,6 +569,8 @@ var index = definePlugin(() => {
             regs?.forEach((r) => r?.unregister?.());
             stopSlotWatch?.();
             stopChangeWatch();
+            dismounted = true;
+            removeMenuPatches();
         },
     };
 });

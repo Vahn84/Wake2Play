@@ -41,6 +41,9 @@ DEFAULTS = {
     # A running streamed game doesn't pick up a controller that joins or replaces
     # the one it was using; offer to restart the stream when the set changes.
     "offer_stream_restart": True,
+    # Wake PC / Sleep PC on library game pages and Disconnect items in the
+    # in-game Steam menu (patches Steam's own UI; off removes every patch).
+    "show_menu_buttons": True,
     # Show the event log in the plugin panel and toast debug info on resume
     "debug": False,
 }

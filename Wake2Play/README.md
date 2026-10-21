@@ -60,6 +60,27 @@ The panel's **Host PC** section shows live host status (Awake / Asleep) and the
 **Wake host** / **Sleep host** buttons; both report the confirmed outcome, not just
 "sent".
 
+### Buttons in Steam's menus
+
+Setting **Show buttons in Steam's menus** (default on; off removes every patch):
+
+- **In-game Steam menu** (Steam button during a game), only while a Remote Play stream is
+  up: **Disconnect (keep game running)** and **Disconnect & sleep PC**, just above
+  "Exit game", styled as Steam's own entries. The second sleeps the PC only if the
+  disconnect worked.
+- **Library game page** for any game that is on the Remote Play host (also if it is
+  installed on the Deck too): a **Wake PC** button when the host is asleep, **Sleep PC**
+  when it is awake and not streaming, at the right end of the Play row (MoonDeck's moon
+  stays where it is).
+
+This patches Steam's own UI, so it is written to fail safe: every patch catches its own
+errors and hands Steam its untouched output, a target missing after a Steam update is
+logged once (Debug mode shows it) and just leaves that menu alone, and everything is
+undone when the plugin unloads or the setting is switched off. The game page uses
+Decky's `routerHook`. The in-game menu has no hook (its entries are built inside one
+Steam module and not exported), so `src/menus.js` finds the menu component by what its
+source mentions and wraps it where React creates elements (`SP_JSX.jsx`/`jsxs`).
+
 ## Host PC setup (Windows)
 
 1. Download [sleep-on-lan](https://github.com/SR-G/sleep-on-lan/releases) (`sol.exe`).
@@ -124,7 +145,8 @@ The panel's **Host PC** section shows live host status (Awake / Asleep) and the
 ## Build
 
 No toolchain: `dist/index.js` is `src/decky-runtime.js` (vendored @decky/api shim +
-icon) concatenated with `src/plugin.js`. `deploy.sh` does it.
+icon), `src/menus.js` (the Steam menu patches) and `src/plugin.js`, concatenated in that
+order. `deploy.sh` does it.
 
 ## Deploy to the Deck
 

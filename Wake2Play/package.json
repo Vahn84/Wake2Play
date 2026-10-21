@@ -1,6 +1,6 @@
 {
   "name": "wake2play",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Decky plugin: sleep the Remote Play host PC when the Deck suspends, wake it (WOL) when the Deck resumes.",
   "type": "module",
   "scripts": {

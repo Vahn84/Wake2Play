@@ -17,6 +17,7 @@ if (api._version != API_VERSION) {
 }
 const callable = api.callable;
 const toaster = api.toaster;
+const routerHook = api.routerHook;
 const definePlugin = (fn) => {
     return (...args) => {
         return fn(...args);

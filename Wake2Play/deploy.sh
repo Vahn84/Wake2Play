@@ -8,7 +8,7 @@ DECK_HOST="${DECK_HOST:-deck@steamdeck.local}"
 DEST=homebrew/plugins/Wake2Play
 
 mkdir -p dist
-cat src/decky-runtime.js src/plugin.js > dist/index.js
+cat src/decky-runtime.js src/menus.js src/plugin.js > dist/index.js
 python3 -I -m py_compile main.py
 
 # Installable package (Decky → Developer → Install plugin from ZIP/URL)

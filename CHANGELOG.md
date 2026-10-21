@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.6 — 2026-10-21
+Disconnect and wake/sleep without leaving Steam's own screens. While streaming, the in-game
+Steam menu gets **Disconnect (keep game running)** and **Disconnect & sleep PC** above
+"Exit game" (Steam's own entry, so it looks and navigates like the rest). On the library
+page of any game that lives on the Remote Play host, a **Wake PC** / **Sleep PC** button
+sits at the right end of the Play row (Wake when the host is asleep, Sleep when it is awake
+and not streaming). The page uses Decky's routerHook; the in-game menu has no hook, so the
+plugin recognises Steam's menu component and wraps it. Every patch is fail-safe (errors
+return Steam's untouched output, a missing target is logged once, all undone on unload) and
+the panel has a "Show buttons in Steam's menus" switch (default on).
+tests: on the Deck — plugin loads, patches install; synthetic menu column in a detached React
+root gets both items only while streaming, none when the switch is off or the exit entry is
+missing (logged once); real game page shows Sleep PC on the host game and nothing on a
+Deck-only game or with the switch off. Not yet pressed on the Deck: the items/buttons
+themselves, and the look/navigation of the real in-game menu
+
 ## 1.0.5 — 2026-10-21
 A controller turned on mid-stream never reached the running game (it joins as the next
 player and no reorder, on the Deck or the PC, reaches the game; only a fresh stream does).
