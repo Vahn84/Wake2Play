@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.3 — 2026-10-21
+Deck controls dead in the game after a night's sleep: Steam doesn't move controllers up
+when one leaves, so once the Steam Controller turned off the Deck's own controls stayed
+player 2 with player 1 empty, and the restarted stream kept that order (Steam menus worked,
+the game didn't; "Rearrange controller order" was the only way out). Wake2Play now checks
+every 2 s and closes any gap with the same swap Steam's rearrange screen uses (toggle
+"Keep player 1 filled", on by default), and logs the controller order at suspend and resume.
+tests: gap made on the Deck → moved back to P1 within 2 s and logged; the swap was also
+confirmed mid-stream (game took the Deck controls); overnight case pending
+
 ## 1.0.2 — 2026-10-17
 Reconnect screen cut the cover off in handheld mode: its content was 546 px tall on a
 534 px (1280×800 @1.5×) screen, mostly Steam's spinner, which ignores size props and

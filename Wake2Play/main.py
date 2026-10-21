@@ -34,6 +34,9 @@ DEFAULTS = {
     # After a confirmed wake, restart the Remote Play stream of the game that was
     # streaming when the Deck suspended (the game is still running on the host).
     "resume_stream": True,
+    # Steam leaves player slots empty when a controller turns off (e.g. the Deck's
+    # own controls stay player 2 after the Steam Controller sleeps); move the rest up.
+    "fill_player_slots": True,
     # Show the event log in the plugin panel and toast debug info on resume
     "debug": False,
 }
@@ -233,6 +236,10 @@ class Plugin:
         with open(SETTINGS_PATH, "w") as f:
             json.dump(self.settings, f, indent=2)
         return self.settings
+
+    async def log_event(self, msg):
+        """Frontend events (controller slot moves) into the same log as the backend's."""
+        self._dbg(str(msg)[:300])
 
     async def is_streaming(self):
         return _is_streaming()
