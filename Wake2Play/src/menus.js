@@ -188,7 +188,12 @@ const PowerIcon = (props) => SP_JSX.jsxs("svg", { viewBox: "0 0 24 24", width: p
     ] });
 const MOONDECK_CONTAINER = ".moondeck-container";
 const HOST_BUTTON_GAP_PX = 10;
-const HOST_BUTTON_CSS = ".w2p-button { margin: 0 !important; }"; // like MoonDeck's: no side margin from the MenuButton class
+// Like MoonDeck's: no side margin from the MenuButton class. Selected, Steam paints the
+// button white; its own buttons' icons turn dark then, ours must too or they vanish.
+const HOST_BUTTON_CSS = ".w2p-button { margin: 0 !important; }"
+    + " .w2p-button.gpfocus, .w2p-button:focus, .w2p-button:hover { color: #0e141b !important; }"
+    + " .w2p-button.gpfocus svg:not([fill=none]), .w2p-button:focus svg:not([fill=none]), .w2p-button:hover svg:not([fill=none]) { fill: currentColor !important; }"
+    + " .w2p-button.gpfocus svg[stroke], .w2p-button:focus svg[stroke], .w2p-button:hover svg[stroke] { stroke: currentColor !important; }";
 function HostButton({ appid }) {
     const anchor = SP_REACT.useRef(null);
     const [action, setAction] = SP_REACT.useState(null); // "wake" | "sleep" | null (hidden)

@@ -8,6 +8,10 @@ and overview, absolutely positioned Focusable > Button with Steam's own MenuButt
 is focusable the same way. It looks for MoonDeck's button at render time: if present, ours sits
 10 px to its left, level and same look; if not, ours takes that corner. Also hides while the hero
 is shown full screen, and the in-game-menu hook now logs when it is installed/removed/replaced.
+Selected, the icon turned white on Steam's white focus background and vanished (a Steam rule
+forces icon fill white); our icon now turns dark like the neighbouring buttons'. With MoonDeck
+installed the two buttons were separate focus groups and only ours was reachable — user is
+removing MoonDeck, so coexistence wasn't fixed.
 tests: on the Deck — button sits in the same React parent as MoonDeck's anchor, 48x48 at x=1352
 next to MoonDeck's at 1410; with MoonDeck's button hidden it moves to 1410; faked asleep host
 shows the power icon + "Wake PC" label; none on a Deck-only game. D-pad reach and look need eyes
