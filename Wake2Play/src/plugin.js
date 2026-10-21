@@ -182,9 +182,12 @@ function fillPlayerSlots() {
     });
     return moves;
 }
-function watchPlayerSlots() {
+// Only after a wake: the gap opens while the Deck sleeps, and controllers keep
+// (re)connecting while the host wakes and the stream restarts.
+const SLOT_WATCH_MS = 120000;
+function watchPlayerSlots(ms = SLOT_WATCH_MS) {
     let busy = false;
-    const timer = setInterval(async () => {
+    const tick = async () => {
         if (busy || !playerSlots().some((c, i) => c.nXInputIndex !== i))
             return;
         busy = true;
@@ -201,8 +204,11 @@ function watchPlayerSlots() {
         finally {
             busy = false;
         }
-    }, 2000);
-    return () => clearInterval(timer);
+    };
+    const timer = setInterval(tick, 2000);
+    const stop = setTimeout(() => clearInterval(timer), ms);
+    tick();
+    return () => { clearInterval(timer); clearTimeout(stop); };
 }
 function Content() {
     const [settings, setSettings] = SP_REACT.useState(null);
@@ -294,7 +300,7 @@ function Content() {
                         description: "Sleep only if a Remote Play session is active; wake only if the host was slept by this plugin." +
                             (streaming === null ? "" : ` Remote Play now: ${streaming ? "active" : "none"}`),
                         checked: settings.only_when_streaming, onChange: (v) => update({ only_when_streaming: v }) })),
-                    row(SP_JSX.jsx(DFL.ToggleField, { label: "Keep player 1 filled", description: "When a controller turns off, move the others up so player 1 is never left empty", checked: settings.fill_player_slots, onChange: (v) => update({ fill_player_slots: v }) })),
+                    row(SP_JSX.jsx(DFL.ToggleField, { label: "Keep player 1 filled", description: "For 2 minutes after each wake, move controllers up so player 1 is never left empty (Steam leaves a gap when a controller turned off)", checked: settings.fill_player_slots, onChange: (v) => update({ fill_player_slots: v }) })),
                     row(SP_JSX.jsx(DFL.ToggleField, { label: "Reconnect the stream after wake", description: "Restart Remote Play of the game you were streaming once the host is back", checked: settings.resume_stream, onChange: (v) => update({ resume_stream: v }) })),
                 ] }),
             SP_JSX.jsxs(DFL.PanelSection, { title: "Advanced", children: [
@@ -361,6 +367,7 @@ function registerSuspendHooks(onSuspend, onResume) {
 }
 var index = definePlugin(() => {
     let resuming = false;
+    let stopSlotWatch = null; // the post-wake player slot check, while it runs
     let suspendedAppid = null; // game streaming when we slept the host
     const regs = registerSuspendHooks(async () => {
         logEvent(`controllers at suspend: ${describeSlots(playerSlots())}`);
@@ -380,6 +387,8 @@ var index = definePlugin(() => {
             return; // one wake loop at a time
         resuming = true;
         logEvent(`controllers at resume: ${describeSlots(playerSlots())}`);
+        stopSlotWatch?.();
+        stopSlotWatch = watchPlayerSlots();
         // Up immediately, before the (up to 60 s) wake, so the user isn't left
         // poking at a library with no stream
         const ctl = suspendedAppid ? openReconnectModal(suspendedAppid) : null;
@@ -409,7 +418,6 @@ var index = definePlugin(() => {
             resuming = false;
         }
     });
-    const stopSlotWatch = watchPlayerSlots();
     if (!regs)
         toast("Suspend/resume hooks unavailable in this Steam version — automation is off, buttons still work");
     return {
@@ -419,7 +427,7 @@ var index = definePlugin(() => {
         icon: SP_JSX.jsx(FaBed, {}),
         onDismount() {
             regs?.forEach((r) => r?.unregister?.());
-            stopSlotWatch();
+            stopSlotWatch?.();
         },
     };
 });

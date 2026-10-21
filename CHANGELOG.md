@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.4 — 2026-10-21
+The player-slot check now runs only for 2 minutes after each wake instead of every 2 s
+all the time: the gap only opens while the Deck sleeps, and the wake window covers the
+host waking and the stream restarting.
+tests: gap made with no wake → left alone; real sleep/wake → P2→P1 right after resume, logged
+
 ## 1.0.3 — 2026-10-21
 Deck controls dead in the game after a night's sleep: Steam doesn't move controllers up
 when one leaves, so once the Steam Controller turned off the Deck's own controls stayed
