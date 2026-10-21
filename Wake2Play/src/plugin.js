@@ -455,6 +455,10 @@ function Content() {
                         description: "Ends the stream on the Deck; the game keeps running on the PC (resume with Stream)",
                         onClick: () => void disconnectStream().then(() => setStreaming(false)),
                         children: "Disconnect (keep game running)" })),
+                    streaming && row(SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy !== null,
+                        description: "Ends the stream and puts the PC to sleep; the game stays suspended in its memory",
+                        onClick: () => void disconnectAndSleep().then(() => setStreaming(false)),
+                        children: "Disconnect & sleep PC" })),
                 ] }),
             SP_JSX.jsxs(DFL.PanelSection, { title: "Automation", children: [
                     row(SP_JSX.jsx(DFL.ToggleField, { label: "Sleep host when Deck suspends", checked: settings.sleep_on_suspend, onChange: (v) => update({ sleep_on_suspend: v }) })),

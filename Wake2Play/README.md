@@ -64,12 +64,17 @@ The panel's **Host PC** section shows live host status (Awake / Asleep) and the
 
 Setting **Show buttons in Steam's menus** (default on; off removes every patch):
 
-- **In-game Steam menu** (Steam button during a game), only while a Remote Play stream is
-  up: **Disconnect (keep game running)** and **Disconnect & sleep PC**, just above
-  "Exit game", styled as Steam's own entries. The second sleeps the PC only if the
-  disconnect worked.
-- **Library game page** for any game that is on the Remote Play host (also if it is
-  installed on the Deck too): a square icon button in the hero banner's top-right corner,
+- **In-game Steam menu: switched off.** Disconnect / Disconnect & sleep PC entries there
+  worked, but Steam offers no hook for that menu; wrapping React's `SP_JSX.jsx` fights
+  Decky's own `injectFCTrampoline` (it stubs and restores that function around every
+  trampolined render, constantly), and keeping the wrap alive was followed by Decky's panel
+  failing to render. Decky's trampoline on the menu component instead left Steam's UI black
+  when the component threw. Code kept in `src/menus.js` behind `GAME_MENU_PATCH_ENABLED`.
+  The panel has **Disconnect (keep game running)** and **Disconnect & sleep PC** instead.
+- **Library game page** for any game installed on the Remote Play host (also if it is
+  installed on the Deck too; remembered while the PC is awake, so it works while it sleeps
+  — see **Games on the PC** in the panel): a square icon button in the hero banner's
+  top-right corner,
   placed and focusable the way MoonDeck places its moon, so the D-pad reaches it the same
   way. A bed means **Sleep PC** (host awake, not streaming), a power symbol means **Wake PC**
   (host asleep); the name is its tooltip/label. If MoonDeck's button is on the page (checked
@@ -80,9 +85,7 @@ This patches Steam's own UI, so it is written to fail safe: every patch catches 
 errors and hands Steam its untouched output, a target missing after a Steam update is
 logged once (Debug mode shows it) and just leaves that menu alone, and everything is
 undone when the plugin unloads or the setting is switched off. The game page uses
-Decky's `routerHook`. The in-game menu has no hook (its entries are built inside one
-Steam module and not exported), so `src/menus.js` finds the menu component by what its
-source mentions and wraps it where React creates elements (`SP_JSX.jsx`/`jsxs`).
+Decky's `routerHook`.
 
 ## Host PC setup (Windows)
 

@@ -101,7 +101,14 @@ function findKeyedList(node, key, depth = 0) {
     }
     return findKeyedList(node.props?.children, key, depth + 1);
 }
+// DISABLED 2026-10-21: wrapping SP_JSX.jsx fights Decky's injectFCTrampoline (it stubs and
+// restores that same function around every trampolined render) and was followed by Decky's
+// own panel failing to render and another plugin failing to load. Off until there is a
+// mechanism that doesn't touch SP_JSX.jsx. The game-page button (routerHook) is unaffected.
+const GAME_MENU_PATCH_ENABLED = false;
 function installGameMenuPatch() {
+    if (!GAME_MENU_PATCH_ENABLED)
+        return () => { };
     if (!steamHasNavColumn()) {
         warnOnce("navcolumn", "in-game menu component not found in this Steam build — no items added there");
         return () => { };
@@ -152,13 +159,29 @@ function installGameMenuPatch() {
     logEvent("menus: in-game menu hook installed");
     // Diagnostic: on 2026-10-21 the hook was found gone mid-session with no reload
     // logged; say when it happens instead of guessing.
-    let replacedLogged = false;
+    // Something occasionally puts Steam's original back (seen twice on 2026-10-21, within
+    // 10 s of a plugin load; culprit unknown). Re-install over the original only — if
+    // another plugin wrapped it instead, leave theirs alone.
+    // The culprit is Decky's own injectFCTrampoline: around each trampolined render it
+    // stubs SP_JSX.jsx and then restores the copy it saved at startup — constantly, even
+    // idle. Re-check every second (one comparison) so the gap stays short; log hourly.
+    let reinstalls = 0, loggedAt = 0;
     const watch = setInterval(() => {
-        if (state.active && SP_JSX.jsx !== jsx && !replacedLogged) {
-            replacedLogged = true;
-            logEvent(`menus: in-game menu hook was replaced (now: ${String(SP_JSX.jsx).slice(0, 60)})`);
+        if (!state.active || SP_JSX.jsx === jsx)
+            return;
+        if (SP_JSX.jsx === origJsx) {
+            SP_JSX.jsx = jsx;
+            if (SP_JSX.jsxs === origJsxs)
+                SP_JSX.jsxs = jsxs;
+            reinstalls++;
+            if (Date.now() - loggedAt > 3600000) {
+                loggedAt = Date.now();
+                logEvent(`menus: in-game menu hook re-installed after Decky reset it (${reinstalls} so far)`);
+            }
         }
-    }, 10000);
+        else
+            warnOnce("replaced", `in-game menu hook replaced by something else (${String(SP_JSX.jsx).slice(0, 60)}) — left alone`);
+    }, 1000);
     return () => {
         clearInterval(watch);
         logEvent("menus: in-game menu hook removed");

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.7 (final) — 2026-10-21
+In-game menu entries switched off. They worked, but Decky's own injectFCTrampoline stubs and
+restores React's SP_JSX.jsx around every trampolined render (traced with a setter trap), which
+undid our wrap constantly; keeping it alive (1 s re-install) was followed by Decky's panel
+failing to render and NonSteamLaunchers failing to load, fixed by a Steam restart and a Decky
+update (cause not separated). Using Decky's trampoline on the menu component instead left
+Steam's UI black when the component threw outside its providers. Both rejected; the panel now
+has Disconnect & sleep PC next to Disconnect. Game-page button unaffected.
+tests: after restart all 20 plugins load, SP_JSX.jsx untouched; panel buttons deployed
+
 ## 1.0.7 — 2026-10-21
 The game-page Wake/Sleep button was unreachable with the D-pad (it sat in a separate DOM
 layer) and was a text button. It is now a square icon button (bed = Sleep PC, power = Wake PC)
