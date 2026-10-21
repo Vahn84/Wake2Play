@@ -177,7 +177,64 @@ function installGameMenuPatch() {
 // uses Steam's own MenuButton class. Where MoonDeck's button is on the page (looked
 // for in the page at render time, not by plugin name) ours sits just left of it, same
 // height and look; without it ours takes the same spot.
-const onRemotePlayHost = (appid) => (window.appStore?.GetAppOverviewByAppID(appid)?.per_client_data ?? []).some((c) => c.clientid !== "0");
+// Online, Steam attaches the host to every owned game; only "installed" ones can stream.
+const onHostNow = (overview) => (overview?.per_client_data ?? []).some((c) => c.clientid !== "0" && c.installed === true);
+// Steam lists a game's Remote Play host only while that host is online, so an asleep PC
+// would hide "Wake PC" exactly when it's needed. Remember, while the PC is up, which
+// games it has (whole library scan, kept on the Deck), and trust that list when it's down.
+const HOST_APPS_KEY = "wake2play.hostApps";
+let hostApps = null;
+function rememberedHostApps() {
+    if (!hostApps) {
+        try {
+            hostApps = new Set(JSON.parse(localStorage.getItem(HOST_APPS_KEY) ?? "[]"));
+        }
+        catch {
+            hostApps = new Set();
+        }
+    }
+    return hostApps;
+}
+const HOST_APPS_TIME_KEY = "wake2play.hostAppsAt";
+// Returns how many games the host lists right now (0 = host not listed: kept old list).
+function rememberHostApps() {
+    try {
+        const all = window.collectionStore?.allAppsCollection?.allApps ?? [];
+        const onHost = all.filter(onHostNow).map((o) => Number(o.appid));
+        if (!onHost.length)
+            return 0; // host not listed right now: keep what we knew
+        hostApps = new Set(onHost);
+        localStorage.setItem(HOST_APPS_KEY, JSON.stringify(onHost));
+        localStorage.setItem(HOST_APPS_TIME_KEY, String(Date.now()));
+        return onHost.length;
+    }
+    catch (e) {
+        warnOnce("hostapps", `could not remember the host's games: ${e}`);
+        return 0;
+    }
+}
+const hostAppsInfo = () => ({ count: rememberedHostApps().size, at: Number(localStorage.getItem(HOST_APPS_TIME_KEY)) || null });
+// Steam lists the host's games a few seconds after the host comes online: retry for
+// up to a minute. Resolves to the number learned (0 if the host never showed up).
+let learning = null;
+function learnHostApps() {
+    learning ??= (async () => {
+        try {
+            for (let i = 0; i < 20; i++) {
+                const n = rememberHostApps();
+                if (n)
+                    return n;
+                await delay(3000);
+            }
+            return 0;
+        }
+        finally {
+            learning = null;
+        }
+    })();
+    return learning;
+}
+const onRemotePlayHost = (appid) => onHostNow(window.appStore?.GetAppOverviewByAppID(Number(appid))) || rememberedHostApps().has(Number(appid));
 // A function, not a constant: plugin.js's helpers don't exist yet while this file loads.
 const hostAction = (which) => which === "wake"
     ? { start: "Waking host…", label: "Wake PC", run: wakeHost, describe: describeWake }
@@ -193,7 +250,8 @@ const HOST_BUTTON_GAP_PX = 10;
 const HOST_BUTTON_CSS = ".w2p-button { margin: 0 !important; }"
     + " .w2p-button.gpfocus, .w2p-button:focus, .w2p-button:hover { color: #0e141b !important; }"
     + " .w2p-button.gpfocus svg:not([fill=none]), .w2p-button:focus svg:not([fill=none]), .w2p-button:hover svg:not([fill=none]) { fill: currentColor !important; }"
-    + " .w2p-button.gpfocus svg[stroke], .w2p-button:focus svg[stroke], .w2p-button:hover svg[stroke] { stroke: currentColor !important; }";
+    + " .w2p-button.gpfocus svg[stroke], .w2p-button:focus svg[stroke], .w2p-button:hover svg[stroke] { stroke: currentColor !important; }"
+    + " .w2p-button svg[fill=none] { fill: none !important; }"; // outline icons (power) stay outlines
 function HostButton({ appid }) {
     const anchor = SP_REACT.useRef(null);
     const [action, setAction] = SP_REACT.useState(null); // "wake" | "sleep" | null (hidden)
@@ -205,6 +263,8 @@ function HostButton({ appid }) {
             if (!onRemotePlayHost(appid))
                 return setAction(null);
             const { awake } = await hostStatus();
+            if (awake === true)
+                rememberHostApps();
             setAction(awake === false ? "wake" : awake === true && !(await isStreaming()) ? "sleep" : null);
         }
         catch {

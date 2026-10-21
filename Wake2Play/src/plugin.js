@@ -340,6 +340,7 @@ function Content() {
     const [awake, setAwake] = SP_REACT.useState(undefined);
     const [busy, setBusy] = SP_REACT.useState(null);
     const [debugLog, setDebugLog] = SP_REACT.useState([]);
+    const [hostGames, setHostGames] = SP_REACT.useState(hostAppsInfo());
     const [hosts] = SP_REACT.useState(getSteamHosts);
     const [solFound, setSolFound] = SP_REACT.useState(null);
     const [advanced, setAdvanced] = SP_REACT.useState(false);
@@ -371,7 +372,13 @@ function Content() {
         isStreaming().then(setStreaming);
         // Live host status while the panel is open
         let alive = true;
-        const poll = () => hostStatus().then((r) => alive && setAwake(r.awake));
+        const poll = () => hostStatus().then((r) => {
+            if (!alive)
+                return;
+            setAwake(r.awake);
+            if (r.awake && rememberHostApps())
+                setHostGames(hostAppsInfo());
+        });
         poll();
         const timer = setInterval(poll, 4000);
         return () => { alive = false; clearInterval(timer); };
@@ -416,6 +423,30 @@ function Content() {
                     row(SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy !== null,
                         onClick: () => void run("sleep", "Putting host to sleep…", sleepHostVerified, describeSleep),
                         children: busy === "sleep" ? "Sleeping…" : "Sleep host" })),
+                    row(SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy !== null,
+                        label: "Games on the PC",
+                        description: hostGames.count
+                            ? `${hostGames.count} games${hostGames.at ? ` · updated ${new Date(hostGames.at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""} — kept so the game pages can offer Wake PC while it sleeps; refreshed whenever the PC is awake`
+                            : "Not learned yet — the list is read from Steam while the PC is awake",
+                        onClick: () => void (async () => {
+                            setBusy("games");
+                            try {
+                                if (awake === false) {
+                                    toast("Waking the PC to read its games…");
+                                    const w = await wakeHost();
+                                    if (!w.ok || w.confirmed === false)
+                                        return toast(describeWake(w));
+                                }
+                                const n = await learnHostApps();
+                                setHostGames(hostAppsInfo());
+                                toast(n ? `${n} games on the PC` : "Steam didn't list the PC's games — is Steam running on it?");
+                            }
+                            finally {
+                                setBusy(null);
+                                hostStatus().then((r) => setAwake(r.awake));
+                            }
+                        })(),
+                        children: busy === "games" ? "Reading…" : awake === false ? "Wake PC and refresh list" : "Refresh list" })),
                     streaming && row(SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy !== null,
                         description: "Use after turning a controller on or off, or reordering them",
                         onClick: () => void restartStreamForControllers(),
@@ -531,6 +562,8 @@ var index = definePlugin(() => {
         suspendedAppid = null;
         try {
             const res = await onDeckResume();
+            if (res.ok && res.confirmed !== false)
+                void learnHostApps(); // host is up: refresh its game list in the background
             const settings = await getSettings();
             if (ctl && !ctl.cancelled) {
                 if (res.resume_appid)
@@ -555,6 +588,7 @@ var index = definePlugin(() => {
         }
     });
     const stopChangeWatch = watchControllerChanges(() => resuming);
+    hostStatus().then((r) => r.awake && learnHostApps()).catch(() => { });
     let dismounted = false;
     getSettings().then((s) => { if (!dismounted && s.show_menu_buttons)
         setMenuPatches(true); }, (e) => console.error("Wake2Play: menu patches not applied:", e));

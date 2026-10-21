@@ -12,6 +12,12 @@ Selected, the icon turned white on Steam's white focus background and vanished (
 forces icon fill white); our icon now turns dark like the neighbouring buttons'. With MoonDeck
 installed the two buttons were separate focus groups and only ours was reachable — user is
 removing MoonDeck, so coexistence wasn't fixed.
+Wake PC never showed while the PC slept: Steam lists a game's host only while it's online.
+The plugin now remembers which games are installed on the PC (Steam's "installed" flag for
+the host — first version counted every owned game, 381; now 21 = the PC's 19 manifests + 2
+non-Steam shortcuts), refreshed whenever it sees the PC awake (load, after wake, panel open),
+with a "Games on the PC" entry and a Refresh button (wakes the PC first if needed). The power
+icon is an outline again when not selected.
 tests: on the Deck — button sits in the same React parent as MoonDeck's anchor, 48x48 at x=1352
 next to MoonDeck's at 1410; with MoonDeck's button hidden it moves to 1410; faked asleep host
 shows the power icon + "Wake PC" label; none on a Deck-only game. D-pad reach and look need eyes
