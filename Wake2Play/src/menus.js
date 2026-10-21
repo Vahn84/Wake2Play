@@ -5,7 +5,7 @@
 //
 // Two patches, both opt-out through the "Show buttons in Steam's menus" setting:
 //   1. In-game Steam menu: two items above "Exit game", only while streaming.
-//   2. Library game page: Wake PC / Sleep PC next to the Play row.
+//   2. Library game page: a Wake PC / Sleep PC icon button in the hero's top-right.
 //
 // Fail-safe, the top requirement: every callback below catches its own errors and
 // hands back Steam's untouched output, targets are feature-detected, a missing
@@ -149,7 +149,19 @@ function installGameMenuPatch() {
     const jsxs = (type, ...rest) => origJsxs(swap(type), ...rest);
     SP_JSX.jsx = jsx;
     SP_JSX.jsxs = jsxs;
+    logEvent("menus: in-game menu hook installed");
+    // Diagnostic: on 2026-10-21 the hook was found gone mid-session with no reload
+    // logged; say when it happens instead of guessing.
+    let replacedLogged = false;
+    const watch = setInterval(() => {
+        if (state.active && SP_JSX.jsx !== jsx && !replacedLogged) {
+            replacedLogged = true;
+            logEvent(`menus: in-game menu hook was replaced (now: ${String(SP_JSX.jsx).slice(0, 60)})`);
+        }
+    }, 10000);
     return () => {
+        clearInterval(watch);
+        logEvent("menus: in-game menu hook removed");
         state.active = false; // inert even if something wrapped us after
         if (SP_JSX.jsx === jsx)
             SP_JSX.jsx = origJsx;
@@ -159,19 +171,30 @@ function installGameMenuPatch() {
 }
 
 // ---- 2. Library game page ---------------------------------------------------
+// Placed and made focusable the way MoonDeck does its moon button, so it is
+// D-pad reachable the same way: an anchor row (zero height) between the hero banner
+// and the overview panel, holding an absolutely positioned Focusable > Button that
+// uses Steam's own MenuButton class. Where MoonDeck's button is on the page (looked
+// for in the page at render time, not by plugin name) ours sits just left of it, same
+// height and look; without it ours takes the same spot.
 const onRemotePlayHost = (appid) => (window.appStore?.GetAppOverviewByAppID(appid)?.per_client_data ?? []).some((c) => c.clientid !== "0");
 // A function, not a constant: plugin.js's helpers don't exist yet while this file loads.
 const hostAction = (which) => which === "wake"
-    ? { start: "Waking host…", busy: "Waking…", label: "Wake PC", run: wakeHost, describe: describeWake }
-    : { start: "Putting host to sleep…", busy: "Sleeping…", label: "Sleep PC", run: sleepHostVerified, describe: describeSleep };
-// The Play row's right-hand button group (Configure Controller, Manage), by the
-// name of its CSS-module class: the hashed class changes between Steam builds.
-const appButtonsClass = () => DFL.findModule((m) => m && typeof m === "object" && typeof m.AppButtons === "string" && typeof m.PlaySection === "string")?.AppButtons;
+    ? { start: "Waking host…", label: "Wake PC", run: wakeHost, describe: describeWake }
+    : { start: "Putting host to sleep…", label: "Sleep PC", run: sleepHostVerified, describe: describeSleep };
+// Power symbol (Wake); FaBed from the bundled icon set is Sleep.
+const PowerIcon = (props) => SP_JSX.jsxs("svg", { viewBox: "0 0 24 24", width: props.size, height: props.size, fill: "none", stroke: "currentColor", strokeWidth: "2.6", strokeLinecap: "round", children: [
+        SP_JSX.jsx("path", { d: "M12 3v9" }), SP_JSX.jsx("path", { d: "M6.3 6.9a8 8 0 1 0 11.4 0" }),
+    ] });
+const MOONDECK_CONTAINER = ".moondeck-container";
+const HOST_BUTTON_GAP_PX = 10;
+const HOST_BUTTON_CSS = ".w2p-button { margin: 0 !important; }"; // like MoonDeck's: no side margin from the MenuButton class
 function HostButton({ appid }) {
     const anchor = SP_REACT.useRef(null);
-    const [target, setTarget] = SP_REACT.useState(null); // the Play row's button container
     const [action, setAction] = SP_REACT.useState(null); // "wake" | "sleep" | null (hidden)
     const [busy, setBusy] = SP_REACT.useState(false);
+    const [place, setPlace] = SP_REACT.useState({ right: "2.8vw", bottom: "16px", moondeck: false });
+    const [hidden, setHidden] = SP_REACT.useState(false); // hero shown full screen
     const refresh = async () => {
         try {
             if (!onRemotePlayHost(appid))
@@ -187,15 +210,24 @@ function HostButton({ appid }) {
         let alive = true;
         const look = () => {
             try {
-                const cls = appButtonsClass();
-                const found = cls ? anchor.current?.parentElement?.querySelector("." + cls) ?? null : null;
-                if (alive)
-                    setTarget((t) => (t === found || (t?.isConnected && !found) ? t : found));
+                const row = anchor.current, page = row?.parentElement;
+                if (!row || !page)
+                    return;
+                // MoonDeck's button, if it is on the page: sit left of it, level with it
+                const md = page.querySelector(MOONDECK_CONTAINER);
+                const rowBox = row.getBoundingClientRect(), mdBox = md?.getBoundingClientRect();
+                const next = mdBox && mdBox.width > 0
+                    ? { right: `${Math.round(rowBox.right - mdBox.left + HOST_BUTTON_GAP_PX)}px`, bottom: `${Math.round(rowBox.bottom - mdBox.bottom)}px`, moondeck: true }
+                    : { right: "2.8vw", bottom: "16px", moondeck: false };
+                // Like MoonDeck's, hide while the hero is shown full screen
+                const top = [...(page.querySelector("." + DFL.appDetailsClasses.Header)?.children ?? [])].find((c) => c.className.includes(DFL.appDetailsHeaderClasses.TopCapsule));
+                const fs = top ? ["FullscreenEnterStart", "FullscreenEnterActive", "FullscreenEnterDone", "FullscreenExitStart", "FullscreenExitActive"].some((k) => DFL.appDetailsHeaderClasses[k] && top.className.includes(DFL.appDetailsHeaderClasses[k])) : false;
+                if (alive) {
+                    setPlace((p) => (p.right === next.right && p.bottom === next.bottom && p.moondeck === next.moondeck ? p : next));
+                    setHidden(fs);
+                }
             }
-            catch {
-                if (alive)
-                    setTarget(null);
-            }
+            catch { }
         };
         look();
         const lookTimer = setInterval(look, 1000);
@@ -219,13 +251,16 @@ function HostButton({ appid }) {
             void refresh();
         }
     };
-    return SP_JSX.jsxs(SP_JSX.Fragment, { children: [
-            SP_JSX.jsx("span", { ref: anchor, style: { display: "none" } }),
-            spec && target && SP_REACTDOM.createPortal(SP_JSX.jsx(DFL.DialogButton, { disabled: busy, onClick: click,
-                // sized like Steam's neighbouring round buttons (48px tall, 10px gap, 16px text)
-                style: { width: "auto", minWidth: 0, height: "48px", flexShrink: 0, padding: "0 18px", margin: "0 0 0 10px", fontSize: "16px", whiteSpace: "nowrap" },
-                children: busy ? spec.busy : spec.label }), target),
-        ] });
+    const Icon = action === "wake" ? PowerIcon : FaBed;
+    return SP_JSX.jsx("div", { ref: anchor, id: "wake2play", style: { position: "relative", height: 0 }, children: spec && !hidden &&
+            SP_JSX.jsxs(DFL.Focusable, { className: DFL.joinClassNames(DFL.basicAppDetailsSectionStylerClasses.AppButtons, "w2p-container"), style: { position: "absolute", right: place.right, bottom: place.bottom }, children: [
+                    SP_JSX.jsx("style", { children: HOST_BUTTON_CSS }),
+                    SP_JSX.jsx(DFL.Focusable, { children: SP_JSX.jsx(DFL.Button, { disabled: busy, "aria-label": spec.label, title: spec.label, onClick: click,
+                            // MoonDeck's own class, only when its button is there, so a
+                            // theme it applies (Clean / High contrast) applies to ours too
+                            className: DFL.joinClassNames(DFL.playSectionClasses.MenuButton, "w2p-button", place.moondeck ? "moondeck-button" : ""),
+                            children: SP_JSX.jsx(Icon, { size: 28 }) }) }),
+                ] }) });
 }
 function installLibraryPatch() {
     const route = "/library/app/:appid";
@@ -274,25 +309,24 @@ function installLibraryPatch() {
         catch { }
     };
 }
-// The page is an InnerContainer holding [hero, overview panel, ...]; the Play row
-// is rendered inside the overview panel, so the button's anchor goes in there and
-// the button itself is portalled into the Play row's button group.
+// The page is an InnerContainer holding [hero, overview panel, ...]; the anchor goes
+// between the hero and the panel, where MoonDeck puts its own.
 function addHostButton(ret) {
     const classes = DFL.appDetailsClasses;
     const hasClass = (x, cls) => cls && typeof x?.props?.className === "string" && x.props.className.includes(cls);
     const inner = DFL.findInReactTree(ret, (x) => Array.isArray(x?.props?.children) && hasClass(x, classes?.InnerContainer));
     if (!inner)
         return; // loading screen
-    const panel = inner.props.children.find((x) => hasClass(x, classes.AppDetailsOverviewPanel));
+    const at = inner.props.children.findIndex((x) => hasClass(x, classes.AppDetailsOverviewPanel));
+    const panel = inner.props.children[at];
     const appid = panel && DFL.findInReactTree(panel.props.children, (x) => typeof x?.props?.overview?.appid === "number")?.props.overview.appid;
     if (typeof appid !== "number") {
         warnOnce("panel", "game page overview panel not found — no button on game pages");
         return;
     }
-    const children = [].concat(panel.props.children ?? []);
-    if (children.some((c) => c?.key === "w2p-host-button"))
+    if (inner.props.children.some((c) => c?.key === "w2p-host-button"))
         return;
-    panel.props.children = [...children, SP_JSX.jsx(HostButton, { appid }, "w2p-host-button")];
+    inner.props.children.splice(at, 0, SP_JSX.jsx(HostButton, { appid }, "w2p-host-button"));
 }
 
 // ---- switching both on/off --------------------------------------------------

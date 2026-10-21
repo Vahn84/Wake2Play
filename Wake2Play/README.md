@@ -69,9 +69,12 @@ Setting **Show buttons in Steam's menus** (default on; off removes every patch):
   "Exit game", styled as Steam's own entries. The second sleeps the PC only if the
   disconnect worked.
 - **Library game page** for any game that is on the Remote Play host (also if it is
-  installed on the Deck too): a **Wake PC** button when the host is asleep, **Sleep PC**
-  when it is awake and not streaming, at the right end of the Play row (MoonDeck's moon
-  stays where it is).
+  installed on the Deck too): a square icon button in the hero banner's top-right corner,
+  placed and focusable the way MoonDeck places its moon, so the D-pad reaches it the same
+  way. A bed means **Sleep PC** (host awake, not streaming), a power symbol means **Wake PC**
+  (host asleep); the name is its tooltip/label. If MoonDeck's button is on the page (checked
+  at render time, not by plugin name) ours sits just left of it with the same look; without
+  MoonDeck it takes that same corner.
 
 This patches Steam's own UI, so it is written to fail safe: every patch catches its own
 errors and hands Steam its untouched output, a target missing after a Steam update is

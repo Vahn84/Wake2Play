@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.7 — 2026-10-21
+The game-page Wake/Sleep button was unreachable with the D-pad (it sat in a separate DOM
+layer) and was a text button. It is now a square icon button (bed = Sleep PC, power = Wake PC)
+in the hero banner's top-right, built the way MoonDeck builds its moon (anchor row between hero
+and overview, absolutely positioned Focusable > Button with Steam's own MenuButton class), so it
+is focusable the same way. It looks for MoonDeck's button at render time: if present, ours sits
+10 px to its left, level and same look; if not, ours takes that corner. Also hides while the hero
+is shown full screen, and the in-game-menu hook now logs when it is installed/removed/replaced.
+tests: on the Deck — button sits in the same React parent as MoonDeck's anchor, 48x48 at x=1352
+next to MoonDeck's at 1410; with MoonDeck's button hidden it moves to 1410; faked asleep host
+shows the power icon + "Wake PC" label; none on a Deck-only game. D-pad reach and look need eyes
+
 ## 1.0.6 — 2026-10-21
 Disconnect and wake/sleep without leaving Steam's own screens. While streaming, the in-game
 Steam menu gets **Disconnect (keep game running)** and **Disconnect & sleep PC** above
