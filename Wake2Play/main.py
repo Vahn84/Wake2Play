@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import signal
 import socket
 import time
 import urllib.request
@@ -37,6 +38,9 @@ DEFAULTS = {
     # Steam leaves player slots empty when a controller turns off (e.g. the Deck's
     # own controls stay player 2 after the Steam Controller sleeps); move the rest up.
     "fill_player_slots": True,
+    # A running streamed game doesn't pick up a controller that joins or replaces
+    # the one it was using; offer to restart the stream when the set changes.
+    "offer_stream_restart": True,
     # Show the event log in the plugin panel and toast debug info on resume
     "debug": False,
 }
@@ -103,8 +107,18 @@ def _streaming_session():
         opts = dict(zip(argv, argv[1:]))
         appid = opts.get("--appid", "")
         return {"appid": int(appid) if appid.isdigit() else None,
-                "server": opts.get("--server", "").rsplit(":", 1)[0] or None}
+                "server": opts.get("--server", "").rsplit(":", 1)[0] or None,
+                "pid": int(pid)}
     return None
+
+
+def _pid_gone(pid):
+    """Exited, or a zombie waiting for Steam to reap it."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] == "Z"
+    except OSError:
+        return True
 
 
 def _is_streaming():
@@ -240,6 +254,31 @@ class Plugin:
     async def log_event(self, msg):
         """Frontend events (controller slot moves) into the same log as the backend's."""
         self._dbg(str(msg)[:300])
+
+    async def stop_stream(self):
+        """End the Deck's stream without telling the host, so it can be restarted
+        with the current controller order while the game keeps running.
+
+        Must be SIGKILL. A graceful exit (SIGTERM/SIGINT, which SDL turns into a
+        quit) sends k_EStreamControlStopRequest and the host QUITS the game
+        (2026-10-21 16:19, lost progress). With no goodbye the host instead logs
+        "Disconnecting due to inactivity (15 seconds)" and keeps the game, as on
+        every network drop (18/18 in its console_log, plus a live test).
+        """
+        session = _streaming_session()
+        if not session:
+            return {"ok": False, "error": "no stream is running"}
+        pid = session["pid"]
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError as e:
+            return {"ok": False, "error": f"could not close the stream ({e})"}
+        for _ in range(50):
+            if _pid_gone(pid):
+                self._dbg(f"stream of app {session['appid']} cut (no stop sent) to apply controller changes")
+                return {"ok": True, "appid": session["appid"]}
+            await asyncio.sleep(0.1)
+        return {"ok": False, "error": "the stream did not close within 5 s"}
 
     async def is_streaming(self):
         return _is_streaming()

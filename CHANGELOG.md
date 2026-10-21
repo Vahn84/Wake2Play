@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.5 — 2026-10-21
+A controller turned on mid-stream never reached the running game (it joins as the next
+player and no reorder, on the Deck or the PC, reaches the game; only a fresh stream does).
+The plugin now asks "play with it as player 1?" when a controller connects during a stream;
+Yes moves it first and restarts the stream in ~3 s with the game still running. A
+controller turning off offers the same restart; the panel has a manual button too, and a
+**Disconnect (keep game running)** button — Steam on the Deck only offers "Exit game", which quits it.
+The first attempt closed the stream gracefully and the host quit the game (lost progress);
+the stream is now cut without a goodbye (SIGKILL), which the host treats as a dropped
+connection, and a new stream is requested at once (the host drops the old session on it).
+tests: live on the Deck with Octopath: force-stop kept the game (same PID, host logged no
+stop), restart back in 3 s; join prompt → Steam Controller player 1; leave prompt checked;
+Disconnect → resumed the same session from the library
+
 ## 1.0.4 — 2026-10-21
 The player-slot check now runs only for 2 minutes after each wake instead of every 2 s
 all the time: the gap only opens while the Deck sleeps, and the wake window covers the

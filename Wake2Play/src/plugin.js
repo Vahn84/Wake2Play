@@ -12,6 +12,7 @@ const isStreaming = callable("is_streaming");
 const getDebugLog = callable("get_debug_log");
 const clearDebugLog = callable("clear_debug_log");
 const logEvent = callable("log_event");
+const stopStream = callable("stop_stream");
 const toast = (body) => toaster.toast({ title: "Wake2Play", body });
 function describeWake(res) {
     if (!res.ok)
@@ -210,6 +211,126 @@ function watchPlayerSlots(ms = SLOT_WATCH_MS) {
     tick();
     return () => { clearInterval(timer); clearTimeout(stop); };
 }
+// A running streamed game doesn't pick up controller changes: a controller that
+// joins mid-stream, or one that replaces the controller the game was using, stays
+// dead in the game whatever the order on the Deck or the PC. Only a fresh stream
+// hands the game its controllers (in the Deck's order). So restart the stream:
+// cut the Deck's stream without a goodbye (to the host a dropped connection; the
+// game keeps running there — a polite close makes the host quit the game) and reconnect the way the post-wake reconnect does.
+let restartingStream = false;
+async function restartStreamForControllers() {
+    if (restartingStream)
+        return;
+    restartingStream = true;
+    try {
+        const moves = fillPlayerSlots(); // the new stream hands the game this order
+        if (moves.length)
+            logEvent(`controllers: moved ${moves.join(", ")}`);
+        logEvent(`controllers before stream restart: ${describeSlots(playerSlots())}`);
+        const res = await stopStream();
+        if (!res.ok)
+            return toast(`Couldn't restart the stream: ${res.error}`);
+        if (!res.appid)
+            return toast("Stream closed — start it again from the library");
+        // No wait: a new stream request makes the host drop the cut session at once
+        // (it would otherwise time it out after 15 s); back to streaming in ~3 s.
+        const ctl = openReconnectModal(res.appid);
+        await resumeStream(res.appid, ctl);
+    }
+    catch (e) {
+        console.error("Wake2Play: stream restart failed:", e);
+        toast(`Couldn't restart the stream: ${e}`);
+    }
+    finally {
+        restartingStream = false;
+    }
+}
+// Steam on the Deck has no "disconnect": its "Exit game" quits the game on the PC.
+// Same cut as the restart, without reconnecting.
+async function disconnectStream() {
+    if (restartingStream)
+        return;
+    try {
+        const res = await stopStream();
+        toast(res.ok ? "Disconnected — the game keeps running on the PC" : `Couldn't disconnect: ${res.error}`);
+    }
+    catch (e) {
+        toast(`Couldn't disconnect: ${e}`);
+    }
+}
+// Which controllers, in which player order. Waits for it to settle (a controller
+// connecting changes it in bursts), asks once per new state while streaming.
+const controllerId = (c) => c.strSerialNumber || `${c.strName}#${c.nControllerIndex}`;
+const controllerKey = () => playerSlots().map(controllerId).join("|");
+// Turning a controller on mid-stream means "I want to play with this one": on Yes
+// it becomes player 1 (the rest keep their order behind it) and the stream restarts.
+function makePlayerOne(id) {
+    const c = playerSlots().find((x) => controllerId(x) === id);
+    if (c && c.nXInputIndex !== 0) {
+        SteamClient.Input.SwapControllerOrder(c.nXInputIndex, 0);
+        logEvent(`controllers: ${c.strName} made player 1`);
+    }
+}
+function watchControllerChanges(isBusy) {
+    let last = controllerKey();
+    let known = new Set(playerSlots().map(controllerId)); // as of the last stream start / answer
+    let changedAt = 0;
+    let pending = false;
+    let asking = false;
+    const timer = setInterval(async () => {
+        const key = controllerKey();
+        if (key !== last) {
+            last = key;
+            changedAt = Date.now();
+            pending = true;
+            return;
+        }
+        if (!pending || asking || Date.now() - changedAt < 3000)
+            return;
+        pending = false;
+        const now = playerSlots();
+        const joined = now.filter((c) => !known.has(controllerId(c)));
+        const seen = new Set(now.map(controllerId));
+        if (isBusy() || restartingStream || !now.length) {
+            known = seen;
+            return;
+        }
+        try {
+            if (!(await getSettings()).offer_stream_restart || !(await isStreaming())) {
+                known = seen;
+                return;
+            }
+            const newest = joined[joined.length - 1];
+            const left = [...known].some((id) => !seen.has(id));
+            logEvent(`controllers changed mid-stream: ${describeSlots(now)}`);
+            asking = true;
+            // The baseline is what this prompt is about; a controller that changes
+            // while it's on screen is judged against it on the next round.
+            known = seen;
+            const answered = () => { asking = false; };
+            DFL.showModal(SP_JSX.jsx(DFL.ConfirmModal, newest ? {
+                strTitle: `${newest.strName} connected`,
+                strDescription: `Play with it as player 1? The stream restarts in a few seconds so the game picks it up; the game keeps running on the PC.`,
+                strOKButtonText: "Make it player 1",
+                strCancelButtonText: "Not now",
+                onOK: () => { makePlayerOne(controllerId(newest)); answered(); void restartStreamForControllers(); },
+                onCancel: answered,
+            } : {
+                strTitle: left ? "Controller disconnected" : "Controller order changed",
+                strDescription: "The game won't pick up the controllers in their new order until the stream restarts. Restart it now? Takes a few seconds; the game keeps running on the PC.",
+                strOKButtonText: "Restart stream",
+                strCancelButtonText: "Not now",
+                onOK: () => { answered(); void restartStreamForControllers(); },
+                onCancel: answered,
+            }));
+        }
+        catch (e) {
+            asking = false;
+            console.error("Wake2Play: controller change check failed:", e);
+        }
+    }, 1000);
+    return () => clearInterval(timer);
+}
 function Content() {
     const [settings, setSettings] = SP_REACT.useState(null);
     const [streaming, setStreaming] = SP_REACT.useState(null);
@@ -292,6 +413,14 @@ function Content() {
                     row(SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy !== null,
                         onClick: () => void run("sleep", "Putting host to sleep…", sleepHostVerified, describeSleep),
                         children: busy === "sleep" ? "Sleeping…" : "Sleep host" })),
+                    streaming && row(SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy !== null,
+                        description: "Use after turning a controller on or off, or reordering them",
+                        onClick: () => void restartStreamForControllers(),
+                        children: "Restart stream to apply controllers" })),
+                    streaming && row(SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy !== null,
+                        description: "Ends the stream on the Deck; the game keeps running on the PC (resume with Stream)",
+                        onClick: () => void disconnectStream().then(() => setStreaming(false)),
+                        children: "Disconnect (keep game running)" })),
                 ] }),
             SP_JSX.jsxs(DFL.PanelSection, { title: "Automation", children: [
                     row(SP_JSX.jsx(DFL.ToggleField, { label: "Sleep host when Deck suspends", checked: settings.sleep_on_suspend, onChange: (v) => update({ sleep_on_suspend: v }) })),
@@ -301,6 +430,7 @@ function Content() {
                             (streaming === null ? "" : ` Remote Play now: ${streaming ? "active" : "none"}`),
                         checked: settings.only_when_streaming, onChange: (v) => update({ only_when_streaming: v }) })),
                     row(SP_JSX.jsx(DFL.ToggleField, { label: "Keep player 1 filled", description: "For 2 minutes after each wake, move controllers up so player 1 is never left empty (Steam leaves a gap when a controller turned off)", checked: settings.fill_player_slots, onChange: (v) => update({ fill_player_slots: v }) })),
+                    row(SP_JSX.jsx(DFL.ToggleField, { label: "Offer a stream restart when controllers change", description: "A running game ignores controllers that join or swap mid-stream; restarting the stream fixes it (the game keeps running)", checked: settings.offer_stream_restart, onChange: (v) => update({ offer_stream_restart: v }) })),
                     row(SP_JSX.jsx(DFL.ToggleField, { label: "Reconnect the stream after wake", description: "Restart Remote Play of the game you were streaming once the host is back", checked: settings.resume_stream, onChange: (v) => update({ resume_stream: v }) })),
                 ] }),
             SP_JSX.jsxs(DFL.PanelSection, { title: "Advanced", children: [
@@ -418,6 +548,7 @@ var index = definePlugin(() => {
             resuming = false;
         }
     });
+    const stopChangeWatch = watchControllerChanges(() => resuming);
     if (!regs)
         toast("Suspend/resume hooks unavailable in this Steam version — automation is off, buttons still work");
     return {
@@ -428,6 +559,7 @@ var index = definePlugin(() => {
         onDismount() {
             regs?.forEach((r) => r?.unregister?.());
             stopSlotWatch?.();
+            stopChangeWatch();
         },
     };
 });

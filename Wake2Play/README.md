@@ -37,6 +37,25 @@ Suspend/resume are detected through Steam's internal `SleepManager` module
 is why v0.5's automation never fired. If neither API is found, the plugin toasts once at
 load and the buttons keep working.
 
+### Controllers
+
+A running streamed game only takes its controllers when the stream starts: a controller
+turned on mid-stream joins as the next player, and reordering on the Deck (or on the PC)
+doesn't reach the game. And Steam never moves controllers up when one leaves, so after the
+Steam Controller turns off the Deck's own controls stay player 2 with player 1 empty.
+
+- **Keep player 1 filled** (default on): for 2 minutes after each wake, empty player slots
+  are closed with the same swap as Steam's "Rearrange controller order".
+- **Offer a stream restart when controllers change** (default on): turn a controller on
+  mid-stream and the plugin asks "play with it as player 1?"; Yes moves it first and
+  restarts the stream in ~3 s. A controller turning off offers the same restart. The panel
+  also has a **Restart stream to apply controllers** button while streaming, and a
+  **Disconnect (keep game running)** button (Steam's own "Exit game" quits the game).
+- The restart cuts `streaming_client` with SIGKILL and immediately asks for a new stream.
+  It must not close it gracefully: a graceful exit sends the host a stop request and the
+  host **quits the game**. With no goodbye the host drops the old session as soon as the
+  new request arrives (or after 15 s of silence) and the game keeps running.
+
 The panel's **Host PC** section shows live host status (Awake / Asleep) and the
 **Wake host** / **Sleep host** buttons; both report the confirmed outcome, not just
 "sent".
